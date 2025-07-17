@@ -1,0 +1,32 @@
+import setuptools
+
+setuptools.setup(
+    name="BO-GP",
+    version="0.0.1",
+    description="BO-GP",
+    packages=setuptools.find_packages(),
+    install_requires=[
+        "ax-platform==0.3.3",
+        "botorch==0.8.5",
+        "GPy==1.10.0",
+        "gpytorch==1.10",
+        "networkx==2.6.3",
+        "ngboost==0.3.11",
+        "celer==0.7.2",
+        "numpy==1.21.6",
+        "pyDOE==0.3.8",
+        "pyro-ppl==1.9.0",
+        "scikit-image==0.19.2",
+        "scikit-learn==1.0.2",
+        "scipy==1.10.1",
+        "sobol-seq==0.2.0",
+        "torch==2.0.1",
+        "torchvision==0.15.2",
+        "torchaudio==2.0.2",
+        "typeguard==2.13.3",
+        "typing_extensions==4.10.0",
+        "xgboost==1.4.2",
+        "numba==0.56.4",
+    ],
+    python_requires='>=3.7',
+)
