@@ -6,7 +6,7 @@ import time
 from infras.randutils import *
 
 
-def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, if_softplus=True, acqf_type="UCB", if_matern=True, set_ls=False,
+def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, if_softplus=True, acqf_type="UCB", set_ls=False,
                kernel_type="matern",
                device="cpu"):
     best_y = []
@@ -19,16 +19,15 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
         X, Y = dataset.get_data(normalize=True)
         X, Y = X.to(device), Y.to(device)
         best_y_before = dataset.get_curr_max_unnormed()
-        #--------- ADD KERNEL TYPE ---------
-        model = GP_Wrapper(X, Y, if_ard, if_softplus, if_matern=if_matern, set_ls=set_ls, kernel_type=kernel_type)
+        
+        # Removed if_matern from here:
+        model = GP_Wrapper(X, Y, if_ard=if_ard, if_softplus=if_softplus, set_ls=set_ls, kernel_type=kernel_type, device=device)
 
         if func_name in ["Ackley150"]:
             model.train_model(1000, 0.01)
         elif func_name in ["Ackley"]:
-            # For stability across different cpu platform
             model.train_model(None, None, optim="botorch")
         elif func_name == "Hartmann6":
-            # We used RMSProp here, due to adam being not efficient
             model.train_model(400, 0.01, optim="RMSPROP")
         else:
             model.train_model(500, 0.1)
@@ -51,11 +50,10 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
                 raw_samples=1000,
                 options={},
             )
-
         except:
             print(f"ERROR during opt acqf, using random point")
             new_x = torch.rand(dim)
-        
+
         end_time = time.time()
         time_used = end_time - start_time
         time_list.append(time_used)
@@ -66,6 +64,7 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
         print(f"Seed: {seed} --- At itr: {itr}: best value before={best_y_before}, best value after={best_y_after}, current query: {dataset.y[-1]}", flush=True)
         best_y.append(best_y_before)
     return best_y, time_list
+
 
 
 def Vanilla_BO_loop(func_name, dataset, seed, num_step=200):

@@ -144,22 +144,31 @@ class ExactGPModelRBF(gpytorch.models.ExactGP, GPyTorchModel):
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 class GP_Wrapper:
-    # Add kernel_type as a parameter
-    def __init__(self, train_x, train_y, if_ard=False, if_softplus=True, if_matern=True, set_ls=False, device="cpu", kernel_type="matern"): # New: kernel_type
+    def __init__(self, train_x, train_y, if_ard=False, if_softplus=True, set_ls=False, device="cpu", kernel_type="matern"):
         self.device = device
         self.X = train_x
         self.y = train_y.squeeze()
-
         self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(self.device)
 
-        if kernel_type == "matern": # Changed from if_matern to kernel_type
-            self.gp_model = ExactGPModel(self.X, self.y, self.likelihood, if_ard, if_softplus, set_ls=set_ls).to(self.device)
-        elif kernel_type == "rbf": # Added elif for rbf
-            self.gp_model = ExactGPModelRBF(self.X, self.y, self.likelihood, if_ard, if_softplus, set_ls=set_ls).to(self.device)
-        elif kernel_type == "polynomial": # Added elif for polynomial
-            self.gp_model = ExactGPModelPolynomial(self.X, self.y, self.likelihood, power=4, set_ls=set_ls).to(self.device)
+        if kernel_type == "matern":
+            base_kernel = gpytorch.kernels.MaternKernel(ard_num_dims=self.X.shape[1], nu=2.5)
+        elif kernel_type == "matern32":
+            base_kernel = gpytorch.kernels.MaternKernel(ard_num_dims=self.X.shape[1], nu=1.5)
+        elif kernel_type == "matern12":
+            base_kernel = gpytorch.kernels.MaternKernel(ard_num_dims=self.X.shape[1], nu=0.5)
+        elif kernel_type == "rbf":
+            base_kernel = gpytorch.kernels.RBFKernel(ard_num_dims=self.X.shape[1])
+        elif kernel_type == "polynomial":
+            base_kernel = gpytorch.kernels.PolynomialKernel(power=4)
+        elif kernel_type == "rq":  # Rational Quadratic
+            base_kernel = gpytorch.kernels.RationalQuadraticKernel(ard_num_dims=self.X.shape[1])
         else:
             raise NotImplementedError(f"Kernel type '{kernel_type}' not supported.")
+
+        covar_module = gpytorch.kernels.ScaleKernel(base_kernel)
+        self.gp_model = ExactGPModel(self.X, self.y, self.likelihood, if_ard=if_ard, if_softplus=if_softplus, set_ls=set_ls)
+        # Override the gp_model's covar_module with the one above
+        self.gp_model.covar_module = covar_module.to(self.device)
 
 # class GP_Wrapper:
 #     def __init__(self, train_x, train_y, if_ard=False, if_softplus=True, if_matern=True, set_ls=False, device="cpu"):
