@@ -12,7 +12,6 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
     best_y = []
     time_list = []
     dim = dataset.func.dims
-
     for i in range(1, num_step+1):
         start_time = time.time()
 
@@ -74,7 +73,6 @@ def Vanilla_BO_loop(func_name, dataset, seed, num_step=200):
     best_y = []
     time_list = []
     dim = dataset.func.dims
-
     for i in range(1, num_step + 1):
         start_time = time.time()
         X, Y = dataset.get_data(normalize=True)
@@ -105,6 +103,7 @@ def Vanilla_BO_loop(func_name, dataset, seed, num_step=200):
             f"Seed: {seed} --- At itr: {i}: best value before={best_y_before}, best value after={best_y_after}, current query: {dataset.y[-1]}",
             flush=True)
         best_y.append(best_y_before)
+        
     return best_y, time_list
 
 

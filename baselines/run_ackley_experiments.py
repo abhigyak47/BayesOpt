@@ -6,7 +6,7 @@ import numpy as np
 
 from data import FuncAckley, BayesOptDataset
 from . import BO_loop
-from .BO_loop import BO_loop_GP
+from .BO_loop import BO_loop_GP  
 
 # Configurations
 DIM = 10
@@ -14,9 +14,9 @@ NUM_INIT = 20
 NUM_ITER = 50
 BETA = 1.5
 SEEDS = list(range(1, 11))
-KERNELS = ["rbf", "matern32", "matern12", "matern"]  # rq = rational quadratic
-
-RESULTS_CSV = "Ackley.csv"
+#KERNELS = ["rbf", "matern32", "matern12", "matern", "rq"]  # Make sure "rq" is supported in KERNEL_DEFAULTS
+KERNELS = ["rq"]
+RESULTS_CSV = "Ackley2.csv"
 
 def run_experiment():
     # Prepare CSV file with header
@@ -48,11 +48,11 @@ def run_experiment():
                     seed=seed,
                     num_step=NUM_ITER,
                     beta=BETA,
-                    if_ard=True,          # default ARD on
-                    if_softplus=True,     # default softplus on
+                    if_ard=True,
+                    if_softplus=True,
                     acqf_type="UCB",
                     set_ls=False,
-                    kernel_type=kernel,
+                    kernel_type=kernel,  # must match string in KERNEL_DEFAULTS
                 )
 
                 # Save results to CSV
@@ -69,7 +69,7 @@ def run_experiment():
                 print(f"Seed {seed} with kernel {kernel} done.")
 
             except Exception as e:
-                print(f"Error for seed {seed} kernel {kernel}: {e}")
+                print(f"Error for seed {seed}, kernel {kernel}: {e}")
 
 if __name__ == "__main__":
     run_experiment()

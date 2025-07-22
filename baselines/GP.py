@@ -25,8 +25,10 @@ from pyro.infer.mcmc import NUTS, MCMC
 import pyro
 from botorch.models.gp_regression import SingleTaskGP
 
+from functools import partial
+
 #------- ADD POLYNOMIAL KERNEL ---------
-from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel, PolynomialKernel
+from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel, RQKernel
 import botorch
 from gpytorch.functions import RBFCovariance
 from gpytorch.settings import trace_mode
@@ -36,6 +38,14 @@ from botorch.optim.stopping import ExpMAStoppingCriterion
 #np.random.seed(0)
 #random.seed(0)
 
+KERNEL_DEFAULTS = {
+    # Format: KernelType: (constructor, default_nu, supports_ard)
+    "matern12": (MaternKernel, 0.5, True),
+    "matern32": (MaternKernel, 1.5, True),
+    "matern": (MaternKernel, 2.5, True),
+    "rbf": (RBFKernel, None, True),
+    "rq": (RQKernel, None, True)
+}
 
 def inv_sigmoid(x):
     return torch.log(x) - torch.log(1 - x)
@@ -144,31 +154,43 @@ class ExactGPModelRBF(gpytorch.models.ExactGP, GPyTorchModel):
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 class GP_Wrapper:
-    def __init__(self, train_x, train_y, if_ard=False, if_softplus=True, set_ls=False, device="cpu", kernel_type="matern"):
+    def __init__(self, train_x, train_y, kernel="matern", if_ard=False, 
+                 if_softplus=True, set_ls=False, device="cpu", **kernel_args):
         self.device = device
-        self.X = train_x
-        self.y = train_y.squeeze()
-        self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(self.device)
+        self.X = train_x.to(device)
+        self.y = train_y.squeeze().to(device)
+        self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(device)
 
-        if kernel_type == "matern":
-            base_kernel = gpytorch.kernels.MaternKernel(ard_num_dims=self.X.shape[1], nu=2.5)
-        elif kernel_type == "matern32":
-            base_kernel = gpytorch.kernels.MaternKernel(ard_num_dims=self.X.shape[1], nu=1.5)
-        elif kernel_type == "matern12":
-            base_kernel = gpytorch.kernels.MaternKernel(ard_num_dims=self.X.shape[1], nu=0.5)
-        elif kernel_type == "rbf":
-            base_kernel = gpytorch.kernels.RBFKernel(ard_num_dims=self.X.shape[1])
-        elif kernel_type == "polynomial":
-            base_kernel = gpytorch.kernels.PolynomialKernel(power=4)
-        elif kernel_type == "rq":  # Rational Quadratic
-            base_kernel = gpytorch.kernels.RationalQuadraticKernel(ard_num_dims=self.X.shape[1])
+        # Handle kernel construction
+        if isinstance(kernel, str):
+            try:
+                kernel_class, default_nu, supports_ard = KERNEL_DEFAULTS[kernel]
+                base_kernel = kernel_class(
+                    nu=default_nu if kernel_class == MaternKernel else None,
+                    ard_num_dims=train_x.shape[1] if (if_ard and supports_ard) else None,
+                    **kernel_args
+                )
+            except KeyError:
+                raise ValueError(f"Unknown kernel '{kernel}'. Valid: {list(KERNEL_DEFAULTS.keys())}")
         else:
-            raise NotImplementedError(f"Kernel type '{kernel_type}' not supported.")
+            base_kernel = kernel  # Direct kernel injection
 
-        covar_module = gpytorch.kernels.ScaleKernel(base_kernel)
-        self.gp_model = ExactGPModel(self.X, self.y, self.likelihood, if_ard=if_ard, if_softplus=if_softplus, set_ls=set_ls)
-        # Override the gp_model's covar_module with the one above
-        self.gp_model.covar_module = covar_module.to(self.device)
+        # Handle constraints/priors
+        if not if_softplus:
+            base_kernel.lengthscale_constraint = Positive(transform=torch.exp, inv_transform=torch.log)
+        
+        if set_ls:
+            base_kernel.lengthscale = torch.ones_like(base_kernel.lengthscale) * math.sqrt(train_x.shape[1])
+
+        # Finalize
+        self.gp_model = ExactGPModel(
+            self.X, self.y, self.likelihood,
+            if_ard=if_ard,
+            if_softplus=if_softplus,
+            set_ls=set_ls
+        ).to(device)
+        self.gp_model.covar_module = ScaleKernel(base_kernel).to(device)
+
 
 # class GP_Wrapper:
 #     def __init__(self, train_x, train_y, if_ard=False, if_softplus=True, if_matern=True, set_ls=False, device="cpu"):
