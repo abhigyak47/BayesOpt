@@ -14,7 +14,7 @@ NUM_INIT = 20
 NUM_ITER = 50
 BETA = 1.5
 SEEDS = list(range(1, 11))
-KERNELS = ["rbf", "matern32", "matern12", "rq"]  # rq = rational quadratic
+KERNELS = ["rbf", "matern32", "matern12", "matern"]  # rq = rational quadratic
 
 RESULTS_CSV = "Ackley.csv"
 

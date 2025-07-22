@@ -14,8 +14,7 @@ NUM_INIT = 20
 NUM_ITER = 50
 BETA = 1.5
 SEEDS = list(range(1, 11))
-KERNELS = ["rbf", "matern32", "matern12", "rq"]  # rational quadratic
-
+KERNELS = ["rbf", "matern32", "matern12", "matern"]  
 RESULTS_CSV = "Rover60.csv"
 
 def run_experiment():
