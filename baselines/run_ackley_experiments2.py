@@ -9,13 +9,13 @@ from . import BO_loop
 from .BO_loop import BO_loop_GP  
 
 # Configurations
-DIM = 100
+DIM = 150
 NUM_INIT = 20
 NUM_ITER = 100
 BETA = 1.5
 SEEDS = list(range(1, 11))
 KERNELS = ["rbf", "matern32", "matern12", "matern", "rq","wendland","linear*matern32","cauchy"]  # Make sure "rq" is supported in KERNEL_DEFAULTS
-RESULTS_CSV = "Ackley100.csv"
+RESULTS_CSV = "Ackley150.csv"
 
 def run_experiment():
     # Prepare CSV file with header
