@@ -306,7 +306,7 @@ class GP_Wrapper:
         self.device = device
         self.X = train_x.to(device)
         self.y = train_y.squeeze().to(device)
-        self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(device)
+        self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.Interval(1e-16, 1e-2, initial_value = 1e-7)).to(device)
 
         # Handle kernel construction
         if isinstance(kernel, str):
@@ -338,6 +338,9 @@ class GP_Wrapper:
         ).to(device)
         self.gp_model.covar_module = ScaleKernel(base_kernel).to(device)
 
+        # warm-restart state
+        self.mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model).to(device)
+        self.optimizer = None  # created on first call to init_optimizer
 
 # class GP_Wrapper:
 #     def __init__(self, train_x, train_y, if_ard=False, if_softplus=True, if_matern=True, set_ls=False, device="cpu"):
@@ -381,6 +384,36 @@ class GP_Wrapper:
             loss = -mll(output, self.y)
             loss.backward()
             optimizer.step()
+
+    
+    # ---- NEW ----
+    def init_optimizer(self, lr=0.1, optim="ADAM"):
+        if optim == "ADAM":
+            self.optimizer = torch.optim.Adam(self.gp_model.parameters(), lr=lr)
+        elif optim == "RMSPROP":
+            self.optimizer = torch.optim.RMSprop(self.gp_model.parameters(), lr=lr)
+        else:
+            raise NotImplementedError(f"Only ADAM/RMSPROP supported here, got {optim}.")
+        return self.optimizer
+
+    # ---- NEW ----
+    @torch.enable_grad()
+    def step(self, epochs: int):
+        self.gp_model.train()
+        self.likelihood.train()
+        for _ in range(epochs):
+            self.optimizer.zero_grad()
+            output = self.gp_model(self.X)
+            loss = -self.mll(output, self.y)
+            loss.backward()
+            self.optimizer.step()
+
+    # ---- NEW ----
+    def update_train_data(self, train_x, train_y):
+        self.X = train_x.to(self.device)
+        self.y = train_y.squeeze().to(self.device)
+        # crucial bit: do NOT recreate the model, just point it to the new data
+        self.gp_model.set_train_data(inputs=self.X, targets=self.y, strict=False)
 
 
     def pred(self, test_x, num_samples=8):
