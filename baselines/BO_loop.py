@@ -6,20 +6,11 @@ import time
 from infras.randutils import *
 
 
-def BO_loop_GP(
-    dataset,
-    seed,
-    num_step=200,
-    beta=1.5,
-    if_ard=False,
-    if_softplus=True,
-    acqf_type="UCB",
-    set_ls=False,
-    kernel_type="matern",
-    device="cpu",
-):
-    best_y, time_list = [], []
-
+def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, if_softplus=True, acqf_type="UCB", set_ls=False,
+               kernel_type="matern",
+               device="cpu"):
+    best_y = []
+    time_list = []
     dim = dataset.func.dims
     bounds = torch.tensor([[0.0] * dim, [1.0] * dim], device=device)
 

@@ -28,7 +28,7 @@ from botorch.models.gp_regression import SingleTaskGP
 from functools import partial
 
 #------- ADD POLYNOMIAL KERNEL ---------
-from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel, RQKernel
+from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel, RQKernel, ConstantKernel, PolynomialKernel
 import botorch
 from gpytorch.functions import RBFCovariance
 from gpytorch.settings import trace_mode
@@ -174,24 +174,44 @@ class ProductKernel(gpytorch.kernels.Kernel):
 
 KERNEL_DEFAULTS = {
     # Format: KernelType: (constructor, default_nu, supports_ard)
-    "matern12": (MaternKernel, 0.5, True),
-    "matern32": (MaternKernel, 1.5, True),
-    "matern": (MaternKernel, 2.5, True),
+    "mat12": (MaternKernel, 0.5, True),
+    "mat32": (MaternKernel, 1.5, True),
+    "mat52": (MaternKernel, 2.5, True),
     "rbf": (RBFKernel, None, True),
     "rq": (RQKernel, None, True),
 
-    "linear*matern32": (
+    "lin*mat52": (
         lambda ard_num_dims, **kwargs: ProductKernel(
             gpytorch.kernels.LinearKernel(ard_num_dims=ard_num_dims),
-            gpytorch.kernels.MaternKernel(nu=1.5, ard_num_dims=ard_num_dims)
+            gpytorch.kernels.MaternKernel(nu=5.5, ard_num_dims=ard_num_dims)
         ),
         None,  # No nu parameter for product kernels
         True   # 
     ),
 
     "wendland": (WendlandKernel, None, False),
-    "cauchy": (GeneralCauchyKernel, None, False)
-
+    "gcauchy": (GeneralCauchyKernel, None, False),
+    "poly2": (
+        lambda ard_num_dims=None, **kwargs: PolynomialKernel(power=2),
+        None,
+        False
+    ),
+    "poly2*mat52": (
+        lambda ard_num_dims, **kwargs: ProductKernel(
+            PolynomialKernel(power=2),
+            MaternKernel(nu=2.5, ard_num_dims=ard_num_dims)
+        ),
+        None,
+        True
+    ),
+    "mat52+const": (
+        lambda ard_num_dims, **kwargs: gpytorch.kernels.AdditiveKernel(
+            MaternKernel(nu=2.5, ard_num_dims=ard_num_dims),
+            ConstantKernel()
+        ),
+        None,
+        True
+    )
 }
 
 def inv_sigmoid(x):
@@ -301,7 +321,7 @@ class ExactGPModelRBF(gpytorch.models.ExactGP, GPyTorchModel):
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
 class GP_Wrapper:
-    def __init__(self, train_x, train_y, kernel="matern", if_ard=False, 
+    def __init__(self, train_x, train_y, kernel="mat52", if_ard=False, 
                  if_softplus=True, set_ls=False, device="cpu", **kernel_args):
         self.device = device
         self.X = train_x.to(device)
