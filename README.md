@@ -1,1 +1,1 @@
-Run python -m baselines.run_script from the main directory
+Run python -m baselines.<script_name> from the main directory without .py
