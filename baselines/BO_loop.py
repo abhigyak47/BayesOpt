@@ -6,30 +6,53 @@ import time
 from infras.randutils import *
 
 
-def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, if_softplus=True, acqf_type="UCB", set_ls=False,
-               kernel_type="matern",
-               device="cpu"):
-    best_y = []
-    time_list = []
-    dim = dataset.func.dims
-    for i in range(1, num_step+1):
-        start_time = time.time()
+def BO_loop_GP(
+    dataset,
+    seed,
+    num_step=200,
+    beta=1.5,
+    if_ard=False,
+    if_softplus=True,
+    acqf_type="UCB",
+    set_ls=False,
+    kernel_type="matern",
+    device="cpu",
+):
+    best_y, time_list = [], []
 
+    dim = dataset.func.dims
+    bounds = torch.tensor([[0.0] * dim, [1.0] * dim], device=device)
+
+    model = None  # initialized on i == 1
+
+    for i in range(1, num_step + 1):
+        t0 = time.time()
+
+        # full (normalized) dataset every iter
         X, Y = dataset.get_data(normalize=True)
         X, Y = X.to(device), Y.to(device)
-        best_y_before = dataset.get_curr_max_unnormed()
-        
-        # Removed if_matern from here:
-        model = GP_Wrapper(X, Y, if_ard=if_ard, if_softplus=if_softplus, set_ls=set_ls, kernel_type=kernel_type, device=device)
 
-        if func_name in ["Ackley150"]:
-            model.train_model(1000, 0.01)
-        elif func_name in ["Ackley"]:
-            model.train_model(None, None, optim="botorch")
-        elif func_name == "Hartmann6":
-            model.train_model(400, 0.01, optim="RMSPROP")
+        best_y_before = dataset.get_curr_max_unnormed()
+
+        if i == 1:
+            model = GP_Wrapper(
+                X, Y,
+                kernel=kernel_type,
+                if_ard=if_ard,
+                if_softplus=if_softplus,
+                set_ls=set_ls,
+                device=device,
+            )
+            model.init_optimizer(lr=0.1, optim="ADAM")
+            model.step(epochs=500)  # long train once
         else:
-            model.train_model(500, 0.1)
+            # warm restart: reuse params & optimizer states
+            model.update_train_data(X, Y)
+            model.step(epochs=5)
+
+        # *** Switch to eval() before acqf ***
+        model.gp_model.eval()
+        model.likelihood.eval()
 
         if acqf_type == "UCB":
             acqf = UpperConfidenceBound(model=model.gp_model, beta=beta, maximize=True).to(device)
@@ -43,25 +66,32 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
         try:
             new_x, _ = optimize_acqf(
                 acq_function=acqf,
-                bounds=torch.tensor([[0.0] * dim, [1.0] * dim]),
+                bounds=bounds,
                 q=1,
                 num_restarts=10,
                 raw_samples=1000,
                 options={},
             )
-        except:
-            print(f"ERROR during opt acqf, using random point")
-            new_x = torch.rand(dim)
+            new_x = new_x.squeeze(0)  # (d,)
+        except Exception as e:
+            print(f"ERROR during opt acqf ({e}); using random point")
+            new_x = torch.rand(dim, device=device)
 
-        end_time = time.time()
-        time_used = end_time - start_time
+        dataset.add(new_x.detach().cpu())  # if dataset is on CPU
+
+        time_used = time.time() - t0
         time_list.append(time_used)
-        dataset.add(new_x)
-        best_y_after = dataset.get_curr_max_unnormed()
 
+        best_y_after = dataset.get_curr_max_unnormed()
         itr = dataset.X.shape[0]
-        print(f"Seed: {seed} --- At itr: {itr}: best value before={best_y_before}, best value after={best_y_after}, current query: {dataset.y[-1]}", flush=True)
+        print(
+            f"Seed: {seed} --- itr: {itr}: best before={best_y_before}, "
+            f"best after={best_y_after}, curr query: {dataset.y[-1]}, "
+            f"time={time_used:.3f}s",
+            flush=True,
+        )
         best_y.append(best_y_before)
+
     return best_y, time_list
 
 
