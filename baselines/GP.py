@@ -333,7 +333,7 @@ class GP_Wrapper:
             try:
                 kernel_class, default_nu, supports_ard = KERNEL_DEFAULTS[kernel]
                 base_kernel = kernel_class(
-                    #nu=default_nu if kernel_class == MaternKernel else None,
+                    nu=default_nu if kernel_class == MaternKernel else None,
                     ard_num_dims=train_x.shape[1] if (if_ard and supports_ard) else None,
                     **kernel_args
                 )
