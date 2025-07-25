@@ -35,12 +35,12 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
                 device=device,
             )
             model.init_optimizer(lr=0.1, optim="ADAM")
-            model.step(epochs=500)  # long train once
+            model.step(epochs=2000)  # long train once
         else:
             # warm restart: reuse params & optimizer states
             print("warm restarting")
             model.update_train_data(X, Y)
-            model.step(epochs=5)
+            model.step(epochs=50)
 
         # *** Switch to eval() before acqf ***
         model.gp_model.eval()

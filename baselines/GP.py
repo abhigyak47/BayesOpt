@@ -183,7 +183,7 @@ KERNEL_DEFAULTS = {
     "lin*mat52": (
         lambda ard_num_dims, **kwargs: ProductKernel(
             gpytorch.kernels.LinearKernel(ard_num_dims=ard_num_dims),
-            gpytorch.kernels.MaternKernel(nu=5.5, ard_num_dims=ard_num_dims)
+            gpytorch.kernels.MaternKernel(nu=2.5, ard_num_dims=ard_num_dims)
         ),
         None,  # No nu parameter for product kernels
         True   # 
@@ -333,7 +333,7 @@ class GP_Wrapper:
             try:
                 kernel_class, default_nu, supports_ard = KERNEL_DEFAULTS[kernel]
                 base_kernel = kernel_class(
-                    nu=default_nu if kernel_class == MaternKernel else None,
+                    #nu=default_nu if kernel_class == MaternKernel else None,
                     ard_num_dims=train_x.shape[1] if (if_ard and supports_ard) else None,
                     **kernel_args
                 )
@@ -416,17 +416,48 @@ class GP_Wrapper:
             raise NotImplementedError(f"Only ADAM/RMSPROP supported here, got {optim}.")
         return self.optimizer
 
-    # ---- NEW ----
+    def _loss_value(self) -> float:
+        self.gp_model.train()
+        with torch.no_grad():
+            out = self.gp_model(self.X)
+            loss = -self.mll(out, self.y)
+        return loss.item()
+
     @torch.enable_grad()
-    def step(self, epochs: int):
+    def step(self, epochs: int, log_every: int = 0, verbose: bool = True,
+            return_history: bool = False):
         self.gp_model.train()
         self.likelihood.train()
-        for _ in range(epochs):
+    
+        init_loss = 1e10
+        losses = []
+
+        for t in range(epochs):
+
             self.optimizer.zero_grad()
             output = self.gp_model(self.X)
             loss = -self.mll(output, self.y)
             loss.backward()
             self.optimizer.step()
+
+            cur = loss.item()
+
+            if t == 0:
+                init_loss = cur            
+            if return_history:
+                losses.append(cur)
+            if log_every and (t + 1) % log_every == 0 and t > 0:
+                print(f"[epoch {t+1:4d}] loss={cur:.6f} "
+                    f"(Δ={init_loss - cur:.6f}, rel={(init_loss - cur)/abs(init_loss):.2%})")
+
+        end_loss = self._loss_value()
+        if verbose:
+            print(f"[GP_Wrapper.step] {epochs} epochs: "
+                f"{init_loss:.6f} → {end_loss:.6f} "
+                f"(Δ={init_loss - end_loss:.6f}, "
+                f"rel={(init_loss - end_loss)/abs(init_loss):.2%})")
+
+        return (end_loss, losses) if return_history else end_loss
 
     # ---- NEW ----
     def update_train_data(self, train_x, train_y):
