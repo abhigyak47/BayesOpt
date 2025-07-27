@@ -17,16 +17,15 @@ from .BO_loop import BO_loop_GP
 # ----- globals you likely want to tweak -----
 DIM        = 100
 NUM_INIT   = 20
-NUM_ITER   = 20
+NUM_ITER   = 3
 BETA       = 1.5
 SEEDS      = list(range(1, 11))
 #KERNELS = ["rbf", "mat12", "mat52", "lin*mat52", "gcauchy", "poly2", "poly2*mat52", "mat52+const","rq"]
-KERNELS = ["poly2"]
-RESULTS_CSV = "rbrock1002.csv"
+KERNELS = ["poly2","poly2*mat52"]
 
 DEVICE = torch.device("cpu")
 
-def run_one(kernel: str, seed: int, num_iter: int, beta: float, csv_path:str):
+def run_one(kernel: str, seed: int, num_iter: int, beta: float, root_dir: str, func_name="rosenbrock100"):
 
     # keep each worker single-threaded to avoid oversubscription
     os.environ["OMP_NUM_THREADS"] = "1"
@@ -54,17 +53,17 @@ def run_one(kernel: str, seed: int, num_iter: int, beta: float, csv_path:str):
         device=DEVICE
     )
 
-    #Write results asap for this seed
-    fieldnames = ["seed", "kernel", "iteration", "best_obj_val"]
-    write_header = not os.path.exists(csv_path)
-    with open(csv_path, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        if write_header:
-            writer.writeheader()     
+    # File path: results/{function}/{kernel}/{function}_{kernel}_seed{seed}.csv
+    subdir = os.path.join(root_dir, func_name, kernel)
+    os.makedirs(subdir, exist_ok=True)
+    filename = f"{func_name}_{kernel}_seed{seed}.csv"
+    filepath = os.path.join(subdir, filename)
+
+    with open(filepath, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["iteration", "best_obj_val"])
+        writer.writeheader()
         for itr, val in enumerate(best_vals, 1):
             writer.writerow({
-                "seed": seed,
-                "kernel": kernel,
                 "iteration": itr,
                 "best_obj_val": float(val),
             })
@@ -75,8 +74,8 @@ def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--n-workers", type=int, default=os.cpu_count()-1 or 1,
                    help="max parallel processes (default: os.cpu_count()-1)")
-    p.add_argument("--csv", type=str, default=RESULTS_CSV,
-                   help="output CSV path")
+    p.add_argument("--results-dir", type=str, default="results",
+               help="root output directory (default: results/)")
     p.add_argument("--num-iter", type=int, default=NUM_ITER,
                    help="BO iterations per (kernel, seed)")
     return p.parse_args()
@@ -85,9 +84,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    with open(args.csv, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["seed", "kernel", "iteration", "best_obj_val"])
-        writer.writeheader()
+    os.makedirs(args.results_dir, exist_ok=True)
 
     tasks = list(product(KERNELS, SEEDS))
     max_workers = min(args.n_workers, len(tasks))
@@ -100,7 +97,7 @@ def main():
     total_rows = 0
     with ProcessPoolExecutor(max_workers=max_workers) as ex:
         futures = {
-            ex.submit(run_one, k, s, args.num_iter, BETA, args.csv): (k, s)
+            ex.submit(run_one, k, s, args.num_iter, BETA, args.results_dir): (k, s)
             for k, s in tasks
         }
         for fut in as_completed(futures):
@@ -113,17 +110,7 @@ def main():
                 print(f"[ERROR] kernel={k} seed={s}: {e}")
 
     elapsed = time.time() - start
-    print(f"Done in {elapsed/60:.2f} min. Wrote {total_rows} rows to {args.csv}")
-    if os.path.exists(args.csv):
-        with open(args.csv, newline="") as f:
-            reader = csv.DictReader(f)
-            sorted_rows = sorted(reader, key=lambda r: (r["kernel"], int(r["seed"]), int(r["iteration"])))
-
-        with open(args.csv, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["seed", "kernel", "iteration", "best_obj_val"])
-            writer.writeheader()
-            writer.writerows(sorted_rows)
-
+    print(f"Done in {elapsed/60:.2f} min. Wrote {total_rows} rows to {args.results_dir}")
 
 if __name__ == "__main__":
     main()
