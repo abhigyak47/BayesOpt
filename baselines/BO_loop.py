@@ -38,7 +38,6 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
             model.step(epochs=2000)  # long train once
         else:
             # warm restart: reuse params & optimizer states
-            print("warm restarting")
             model.update_train_data(X, Y)
             model.step(epochs=50)
 
@@ -77,7 +76,7 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
         best_y_after = dataset.get_curr_max_unnormed()
         itr = dataset.X.shape[0]
         print(
-            f"Seed: {seed} --- itr: {itr}: best before={best_y_before}, "
+            f"Seed: {seed} --- Kernel: {kernel_type} --- itr: {itr}: best before={best_y_before}, "
             f"best after={best_y_after}, curr query: {dataset.y[-1]}, "
             f"time={time_used:.3f}s",
             flush=True,
@@ -171,5 +170,3 @@ def BO_loop_GP_MAP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=True
             flush=True)
         best_y.append(best_y_before)
     return best_y, time_list
-
-
