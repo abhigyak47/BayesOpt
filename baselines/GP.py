@@ -40,6 +40,187 @@ from botorch.optim.stopping import ExpMAStoppingCriterion
 
 #Add Wendland and GC
 
+
+class FullyModifiedGeneralCauchyKernel(Kernel):
+    r"""
+    Fully‐Modified Generalized Cauchy kernel (stationary):
+
+    .. math::
+        c(h) = (1 + |h|^\alpha)^{-\frac\beta\alpha - 1}
+               \,\Bigl[\,1 + \bigl(1 - \tfrac\beta\gamma\bigr)\,|h|^\alpha\Bigr]
+
+    with trainable parameters
+    - :math:`\alpha\in(0,2]`
+    - :math:`\beta>0`
+    - :math:`\gamma>0` (initial 1.0)
+    - lengthscale :math:`\ell`
+    """
+    has_lengthscale = True
+    is_stationary  = True
+
+    def __init__(
+        self,
+        alpha_constraint=None,
+        beta_constraint=None,
+        gamma_constraint=None,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        # α constraint: (0,2]
+        if alpha_constraint is None:
+            alpha_constraint = Interval(1e-5, 2.0)
+        self.register_parameter(
+            name="raw_alpha",
+            parameter=torch.nn.Parameter(torch.tensor(1.0))
+        )
+        self.register_constraint("raw_alpha", alpha_constraint)
+
+        # β constraint: > 0
+        if beta_constraint is None:
+            beta_constraint = Positive()
+        self.register_parameter(
+            name="raw_beta",
+            parameter=torch.nn.Parameter(torch.tensor(1.0))
+        )
+        self.register_constraint("raw_beta", beta_constraint)
+
+        # γ constraint: > 0
+        if gamma_constraint is None:
+            gamma_constraint = Positive()
+        self.register_parameter(
+            name="raw_gamma",
+            parameter=torch.nn.Parameter(torch.tensor(1.0))
+        )
+        self.register_constraint("raw_gamma", gamma_constraint)
+
+    @property
+    def alpha(self):
+        return self.raw_alpha_constraint.transform(self.raw_alpha)
+
+    @alpha.setter
+    def alpha(self, value):
+        self.initialize(
+            raw_alpha=self.raw_alpha_constraint.inverse_transform(torch.as_tensor(value))
+        )
+
+    @property
+    def beta(self):
+        return self.raw_beta_constraint.transform(self.raw_beta)
+
+    @beta.setter
+    def beta(self, value):
+        self.initialize(
+            raw_beta=self.raw_beta_constraint.inverse_transform(torch.as_tensor(value))
+        )
+
+    @property
+    def gamma(self):
+        return self.raw_gamma_constraint.transform(self.raw_gamma)
+
+    @gamma.setter
+    def gamma(self, value):
+        self.initialize(
+            raw_gamma=self.raw_gamma_constraint.inverse_transform(torch.as_tensor(value))
+        )
+
+    def forward(self, x1, x2, diag=False, **params):
+        # rescale by lengthscale
+        x1_ = x1.div(self.lengthscale)
+        x2_ = x2.div(self.lengthscale)
+
+        # pairwise distance r = ||x1 - x2|| / ℓ
+        r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
+
+        # base power: (1 + r^α)^(-β/α - 1)
+        base = (1 + r.pow(self.alpha)).pow(-self.beta/self.alpha - 1)
+
+        # modification factor: 1 + (1 - β/γ) r^α
+        mod = 1 + (1 - self.beta / self.gamma) * r.pow(self.alpha)
+
+        return base * mod
+
+
+class ModifiedGeneralCauchyKernel(Kernel):
+    r"""
+    Modified Generalized Cauchy kernel (stationary):
+
+    .. math::
+        c(h) = (1 + |h|^\alpha)^{-\frac\beta\alpha - 1}
+               \,\Bigl[\,1 + (1 - \beta)\,|h|^\alpha\Bigr]
+
+    with trainable parameters
+    - :math:`\alpha\in(0,2]`
+    - :math:`\beta>0`
+    - lengthscale :math:`\ell`
+    """
+    has_lengthscale = True
+    is_stationary  = True
+
+    def __init__(
+        self,
+        alpha_constraint=None,
+        beta_constraint=None,
+        **kwargs
+    ):
+        super().__init__(**kwargs)
+        # α constraint: (0,2]
+        if alpha_constraint is None:
+            alpha_constraint = Interval(1e-5, 2.0)
+        self.register_parameter(
+            name="raw_alpha",
+            parameter=torch.nn.Parameter(torch.tensor(1.0))
+        )
+        self.register_constraint("raw_alpha", alpha_constraint)
+
+        # β constraint: > 0
+        if beta_constraint is None:
+            beta_constraint = Positive()
+        self.register_parameter(
+            name="raw_beta",
+            parameter=torch.nn.Parameter(torch.tensor(1.0))
+        )
+        self.register_constraint("raw_beta", beta_constraint)
+
+    @property
+    def alpha(self):
+        return self.raw_alpha_constraint.transform(self.raw_alpha)
+
+    @alpha.setter
+    def alpha(self, value):
+        self.initialize(
+            raw_alpha=self.raw_alpha_constraint.inverse_transform(torch.as_tensor(value))
+        )
+
+    @property
+    def beta(self):
+        return self.raw_beta_constraint.transform(self.raw_beta)
+
+    @beta.setter
+    def beta(self, value):
+        self.initialize(
+            raw_beta=self.raw_beta_constraint.inverse_transform(torch.as_tensor(value))
+        )
+
+    def forward(self, x1, x2, diag=False, **params):
+        # rescale by lengthscale
+        x1_ = x1.div(self.lengthscale)
+        x2_ = x2.div(self.lengthscale)
+
+        # pairwise distance r = ||x1 - x2|| / ℓ
+        r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
+
+        # base power: (1 + r^α)^(-β/α - 1)
+        base = (1 + r.pow(self.alpha)).pow(-self.beta/self.alpha - 1)
+
+        # modification factor: 1 + (1 - β) r^α
+        mod = 1 + (1 - self.beta) * r.pow(self.alpha)
+
+        return base * mod
+
+
+
+
+
 class WendlandKernel(Kernel):
     r"""
     Compactly-supported Wendland kernel (stationary).
@@ -189,7 +370,13 @@ KERNEL_DEFAULTS = {
         True   # 
     ),
 
-    "wendland": (WendlandKernel, None, False),
+    "wendland": (WendlandKernel, 0, False),     # left for legacy purposes
+    "wendland0": (WendlandKernel, 0, False),
+    "wendland1": (WendlandKernel, 1, False),
+    "wendland2": (WendlandKernel, 2, False),
+    "gcauchy": (GeneralCauchyKernel, None, False),
+    "modgcauchy": (ModifiedGeneralCauchyKernel, None, False),
+    "fmgcauchy": (FullyModifiedGeneralCauchyKernel, None, False),
     "gcauchy": (GeneralCauchyKernel, None, False),
     "poly2": (
         lambda ard_num_dims=None, **kwargs: PolynomialKernel(power=2),
@@ -334,6 +521,7 @@ class GP_Wrapper:
                 kernel_class, default_nu, supports_ard = KERNEL_DEFAULTS[kernel]
                 base_kernel = kernel_class(
                     nu=default_nu if kernel_class == MaternKernel else None,
+                    k=default_nu if kernel_class == WendlandKernel else None,
                     ard_num_dims=train_x.shape[1] if (if_ard and supports_ard) else None,
                     **kernel_args
                 )
