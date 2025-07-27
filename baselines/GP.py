@@ -40,106 +40,6 @@ from botorch.optim.stopping import ExpMAStoppingCriterion
 
 #Add Wendland and GC
 
-
-class FullyModifiedGeneralCauchyKernel(Kernel):
-    r"""
-    Fully‐Modified Generalized Cauchy kernel (stationary):
-
-    .. math::
-        c(h) = (1 + |h|^\alpha)^{-\frac\beta\alpha - 1}
-               \,\Bigl[\,1 + \bigl(1 - \tfrac\beta\gamma\bigr)\,|h|^\alpha\Bigr]
-
-    with trainable parameters
-    - :math:`\alpha\in(0,2]`
-    - :math:`\beta>0`
-    - :math:`\gamma>0` (initial 1.0)
-    - lengthscale :math:`\ell`
-    """
-    has_lengthscale = True
-    is_stationary  = True
-
-    def __init__(
-        self,
-        alpha_constraint=None,
-        beta_constraint=None,
-        gamma_constraint=None,
-        **kwargs
-    ):
-        super().__init__(**kwargs)
-        # α constraint: (0,2]
-        if alpha_constraint is None:
-            alpha_constraint = Interval(1e-5, 2.0)
-        self.register_parameter(
-            name="raw_alpha",
-            parameter=torch.nn.Parameter(torch.tensor(1.0))
-        )
-        self.register_constraint("raw_alpha", alpha_constraint)
-
-        # β constraint: > 0
-        if beta_constraint is None:
-            beta_constraint = Positive()
-        self.register_parameter(
-            name="raw_beta",
-            parameter=torch.nn.Parameter(torch.tensor(1.0))
-        )
-        self.register_constraint("raw_beta", beta_constraint)
-
-        # γ constraint: > 0
-        if gamma_constraint is None:
-            gamma_constraint = Positive()
-        self.register_parameter(
-            name="raw_gamma",
-            parameter=torch.nn.Parameter(torch.tensor(1.0))
-        )
-        self.register_constraint("raw_gamma", gamma_constraint)
-
-    @property
-    def alpha(self):
-        return self.raw_alpha_constraint.transform(self.raw_alpha)
-
-    @alpha.setter
-    def alpha(self, value):
-        self.initialize(
-            raw_alpha=self.raw_alpha_constraint.inverse_transform(torch.as_tensor(value))
-        )
-
-    @property
-    def beta(self):
-        return self.raw_beta_constraint.transform(self.raw_beta)
-
-    @beta.setter
-    def beta(self, value):
-        self.initialize(
-            raw_beta=self.raw_beta_constraint.inverse_transform(torch.as_tensor(value))
-        )
-
-    @property
-    def gamma(self):
-        return self.raw_gamma_constraint.transform(self.raw_gamma)
-
-    @gamma.setter
-    def gamma(self, value):
-        self.initialize(
-            raw_gamma=self.raw_gamma_constraint.inverse_transform(torch.as_tensor(value))
-        )
-
-    def forward(self, x1, x2, diag=False, **params):
-        # rescale by lengthscale
-        x1_ = x1.div(self.lengthscale)
-        x2_ = x2.div(self.lengthscale)
-
-        # pairwise distance r = ||x1 - x2|| / ℓ
-        r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
-
-        # base power: (1 + r^α)^(-β/α - 1)
-        base = (1 + r.pow(self.alpha)).pow(-self.beta/self.alpha - 1)
-
-        # modification factor: 1 + (1 - β/γ) r^α
-        mod = 1 + (1 - self.beta / self.gamma) * r.pow(self.alpha)
-
-        return base * mod
-
-
 class ModifiedGeneralCauchyKernel(Kernel):
     r"""
     Modified Generalized Cauchy kernel (stationary):
@@ -225,8 +125,7 @@ class WendlandKernel(Kernel):
     r"""
     Compactly-supported Wendland kernel (stationary).
 
-    For distance :math:`r = \|x-x'\|/\ell` and parameters :math:`k \in \{0,1,2\}`, 
-    :math:`\mu > 0`:
+    For distance :math:`r = \|x-x'\|/lengthscale` and parameters :math:`k \in \{0,1,2\}`
 
     .. math::
         k(r) = 
@@ -236,41 +135,24 @@ class WendlandKernel(Kernel):
             (1-r)_+^{\ell+2}\left[1+(\ell+2)r+\frac{1}{3}(\ell^2+4\ell+3)r^2\right], & k=2
         \end{cases}
 
-    where :math:`\ell = k + 1 + \mu` and :math:`(1-r)_+ = \max(1-r,0)`.
+    where :math:`\ell = k + 1` and :math:`(1-r)_+ = \max(1-r,0)`.
     """
     has_lengthscale = True
     is_stationary = True
 
-    def __init__(self, mu: float = 1.0, k: int = 0, **kwargs):
+    def __init__(self, k: int = 0, **kwargs):
         super().__init__(**kwargs)
         if k not in {0, 1, 2}:
             raise ValueError("k must be 0, 1, or 2")
         self.k = k
         
-        # Register mu parameter with positive constraint
-        self.register_parameter(
-            name="raw_mu", 
-            parameter=torch.nn.Parameter(torch.tensor(mu))
-        )
-        self.register_constraint("raw_mu", Positive())
-
-    @property
-    def mu(self):
-        return self.raw_mu_constraint.transform(self.raw_mu)
-    
-    @mu.setter
-    def mu(self, value):
-        if not torch.is_tensor(value):
-            value = torch.as_tensor(value).to(self.raw_mu)
-        self.initialize(raw_mu=self.raw_mu_constraint.inverse_transform(value))
-
     def forward(self, x1, x2, diag=False, **params):
         x1_ = x1.div(self.lengthscale)
         x2_ = x2.div(self.lengthscale)
         r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
         support = (1 - r).clamp(min=0)  # (1-r)_+
-        ell = self.k + 1 + self.mu
-        
+        ell = self.k + 1
+
         if self.k == 0:
             return support.pow(ell)
         elif self.k == 1:
