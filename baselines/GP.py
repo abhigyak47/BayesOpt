@@ -258,7 +258,6 @@ KERNEL_DEFAULTS = {
     "wendland2": (WendlandKernel, 2, False),
     "gcauchy": (GeneralCauchyKernel, None, False),
     "modgcauchy": (ModifiedGeneralCauchyKernel, None, False),
-    "fmgcauchy": (FullyModifiedGeneralCauchyKernel, None, False),
     "gcauchy": (GeneralCauchyKernel, None, False),
     "poly2": (
         lambda ard_num_dims=None, **kwargs: PolynomialKernel(power=2),
