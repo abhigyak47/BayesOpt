@@ -25,20 +25,24 @@ class MoptaSoftConstraints:
         self.machine = machine().lower()
         if self.machine == "armv7l":
             assert self.sysarch == 32, "Not supported"
-            self._mopta_exectutable = "mopta08_armhf.bin"
+            self._mopta_executable = "mopta08_armhf.bin"
         elif self.machine == "x86_64":
             assert self.sysarch == 64, "Not supported"
-            self._mopta_exectutable = "mopta08_elf64.bin"
+            self._mopta_executable = "mopta08_elf64.bin"
         elif self.machine == "i386":
             assert self.sysarch == 32, "Not supported"
-            self._mopta_exectutable = "mopta08_elf32.bin"
+            self._mopta_executable = "mopta08_elf32.bin"
         elif self.machine == "amd64":
             assert self.sysarch == 64, "Not supported"
-            self._mopta_exectutable = "mopta08_amd64.exe"
+            self._mopta_executable = "mopta08_amd64.exe"
+
+        #It wasnt working for me. You need to run print(machine().lower()) on python to see whats up with ur computer
+        elif self.machine in ["arm64", "aarch64"]:  
+            self._mopta_executable = "mopta08_arm64.bin"
 
         dir_path = os.path.dirname(os.path.realpath(__file__))
-        self._mopta_exectutable = os.path.join(dir_path, "data", self._mopta_exectutable)
-        os.chmod(self._mopta_exectutable, stat.S_IXUSR)
+        self._mopta_executable = os.path.join(dir_path, "data", self._mopta_executable)
+        os.chmod(self._mopta_executable, stat.S_IXUSR)
 
         self.directory_file_descriptor = tempfile.TemporaryDirectory()
         self.directory_name = self.directory_file_descriptor.name
@@ -54,7 +58,7 @@ class MoptaSoftConstraints:
                 tmp_file.write(f"{_x}\n")
         # pass directory as working directory to process
         popen = subprocess.Popen(
-            self._mopta_exectutable,
+            self._mopta_executable,
             stdout=subprocess.PIPE,
             cwd=self.directory_name,
         )
