@@ -4,15 +4,64 @@ from baselines.GP import GP_Wrapper, GP_MAP_Wrapper, Vanilla_GP_Wrapper
 from data import *
 import time
 from infras.randutils import *
+import pickle
+from typing import Dict, List
+import pandas as pd
+from pathlib import Path
+
+
+def _extract_hyperparams(model) -> Dict[str, float]:
+    """Extracts hyperparameters from a trained GP model"""
+    params = {}
+    
+    # Get kernel parameters
+    if hasattr(model.gp_model.covar_module, 'base_kernel'):
+        kernel = model.gp_model.covar_module.base_kernel
+    else:
+        kernel = model.gp_model.covar_module
+        
+    # Lengthscales (ARD or single)
+    if hasattr(kernel, 'lengthscale'):
+        ls = kernel.lengthscale.detach().cpu().numpy()
+        if ls.shape[1] > 1:  # ARD case
+            for i in range(ls.shape[1]):
+                params[f'lengthscale_dim_{i}'] = float(ls[0, i])
+        else:
+            params['lengthscale'] = float(ls[0, 0])
+    
+    # Output scale
+    if hasattr(model.gp_model.covar_module, 'outputscale'):
+        params['outputscale'] = float(model.gp_model.covar_module.outputscale.detach().cpu().numpy())
+    
+    # Noise variance
+    if hasattr(model.gp_model.likelihood, 'noise'):
+        params['noise'] = float(model.gp_model.likelihood.noise.detach().cpu().numpy())
+    
+    # Kernel-specific parameters
+    if hasattr(kernel, 'nu'):  # Matern nu
+        params['nu'] = float(kernel.nu)
+    elif hasattr(kernel, 'alpha'):  # GeneralCauchy alpha
+        params['alpha'] = float(kernel.alpha)
+        params['beta'] = float(kernel.beta)
+    
+    return params
 
 
 def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, if_softplus=True, acqf_type="UCB", set_ls=False,
                kernel_type="mat52",
                device="cpu"):
+    #initial storing
+    hyperparam_history = []
     best_y = []
     time_list = []
     dim = dataset.func.dims
     bounds = torch.tensor([[0.0] * dim, [1.0] * dim], device=device)
+
+    #create output dir structure
+    base_dir = Path(__file__).parent.parent  # Goes up from baselines/ to project root
+    output_dir = base_dir / "hyperparams" / func_name / kernel_type
+    output_dir.mkdir(parents=True, exist_ok=True)
+
 
     model = None  # initialized on i == 1
 
@@ -40,6 +89,11 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
             # warm restart: reuse params & optimizer states
             model.update_train_data(X, Y)
             model.step(epochs=50)
+
+        #store hyperparameters after training
+        hyperparams = _extract_hyperparams(model)
+        hyperparams['iteration'] = i
+        hyperparam_history.append(hyperparams)
 
         # *** Switch to eval() before acqf ***
         model.gp_model.eval()
@@ -82,6 +136,13 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
             flush=True,
         )
         best_y.append(best_y_before)
+
+
+        #save hyperparam history
+        df_hyperparams = pd.DataFrame(hyperparam_history)
+        output_path = output_dir / f"hyperparams_{func_name}_{kernel_type}_seed{seed}.pkl"
+        df_hyperparams.to_pickle(output_path)
+        print(f"Saved hyperparameters to {output_path}")
 
     return best_y, time_list
 
@@ -126,7 +187,6 @@ def Vanilla_BO_loop(func_name, dataset, seed, num_step=200):
         best_y.append(best_y_before)
         
     return best_y, time_list
-
 
 def BO_loop_GP_MAP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=True, optim_type="LBFGS", acqf_type="UCB",
                    ls_prior_type="Gamma", set_ls=False, if_matern=False, device="cpu"):
