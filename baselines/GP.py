@@ -28,7 +28,7 @@ from botorch.models.gp_regression import SingleTaskGP
 from functools import partial
 
 #------- ADD POLYNOMIAL KERNEL ---------
-from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel, RQKernel, ConstantKernel, PolynomialKernel
+from gpytorch.kernels import MaternKernel, ScaleKernel, RBFKernel, RQKernel, PolynomialKernel
 import botorch
 from gpytorch.functions import RBFCovariance
 from gpytorch.settings import trace_mode
@@ -117,10 +117,6 @@ class ModifiedGeneralCauchyKernel(Kernel):
 
         return base * mod
 
-
-
-
-
 class WendlandKernel(Kernel):
     r"""
     Compactly-supported Wendland kernel (stationary).
@@ -169,31 +165,35 @@ class GeneralCauchyKernel(Kernel):
     .. math::
         k(r) = \left(1 + r^\alpha\right)^{-\beta/\alpha}, \quad r = \|x-x'\|/\ell
 
-    with parameters:
-    - :math:`\alpha \in (0,2]` (controls shape)
-    - :math:`\beta > 0` (controls decay)
-    - :math:`\ell` (lengthscale)
+    Parameters:
+    - alpha ∈ (0, 2] (controls shape)
+    - beta > 0 (controls decay)
+    - lengthscale ℓ can be scalar or vector (via `ard_num_dims`)
     """
     has_lengthscale = True
     is_stationary = True
 
-    def __init__(self, alpha_constraint=None, beta_constraint=None, **kwargs):
-        super().__init__(**kwargs)
-        
-        # Alpha constraint (0 < alpha <= 2)
+    def __init__(
+        self,
+        alpha_constraint=None,
+        beta_constraint=None,
+        ard_num_dims: Optional[int] = None,
+        **kwargs
+    ):
+        super().__init__(ard_num_dims=ard_num_dims, **kwargs)
+
         if alpha_constraint is None:
             alpha_constraint = Interval(1e-5, 2.0)
         self.register_parameter(
-            name="raw_alpha", 
+            name="raw_alpha",
             parameter=torch.nn.Parameter(torch.tensor(1.0))
         )
         self.register_constraint("raw_alpha", alpha_constraint)
-        
-        # Beta constraint (beta > 0)
+
         if beta_constraint is None:
             beta_constraint = Positive()
         self.register_parameter(
-            name="raw_beta", 
+            name="raw_beta",
             parameter=torch.nn.Parameter(torch.tensor(1.0))
         )
         self.register_constraint("raw_beta", beta_constraint)
@@ -201,28 +201,26 @@ class GeneralCauchyKernel(Kernel):
     @property
     def alpha(self):
         return self.raw_alpha_constraint.transform(self.raw_alpha)
-    
+
     @alpha.setter
     def alpha(self, value):
-        if not torch.is_tensor(value):
-            value = torch.as_tensor(value).to(self.raw_alpha)
+        value = torch.as_tensor(value).to(self.raw_alpha)
         self.initialize(raw_alpha=self.raw_alpha_constraint.inverse_transform(value))
-    
+
     @property
     def beta(self):
         return self.raw_beta_constraint.transform(self.raw_beta)
-    
+
     @beta.setter
     def beta(self, value):
-        if not torch.is_tensor(value):
-            value = torch.as_tensor(value).to(self.raw_beta)
+        value = torch.as_tensor(value).to(self.raw_beta)
         self.initialize(raw_beta=self.raw_beta_constraint.inverse_transform(value))
 
     def forward(self, x1, x2, diag=False, **params):
-        x1_ = x1.div(self.lengthscale)
-        x2_ = x2.div(self.lengthscale)
+        x1_ = x1 / self.lengthscale
+        x2_ = x2 / self.lengthscale
         r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
-        return (1 + r.pow(self.alpha)).pow(-self.beta/self.alpha)
+        return (1 + r.pow(self.alpha)).pow(-self.beta / self.alpha)
 
 
 class ProductKernel(gpytorch.kernels.Kernel):
@@ -239,6 +237,7 @@ KERNEL_DEFAULTS = {
     # Format: KernelType: (constructor, default_nu, supports_ard)
     "mat12": (MaternKernel, 0.5, True),
     "mat32": (MaternKernel, 1.5, True),
+    "mat52_ard": (MaternKernel, 2.5, True),
     "mat52": (MaternKernel, 2.5, True),
     "rbf": (RBFKernel, None, True),
     "rq": (RQKernel, None, True),
@@ -256,9 +255,9 @@ KERNEL_DEFAULTS = {
     "wendland0": (WendlandKernel, 0, False),
     "wendland1": (WendlandKernel, 1, False),
     "wendland2": (WendlandKernel, 2, False),
+    "gcauchy_ard": (GeneralCauchyKernel, None, True),
     "gcauchy": (GeneralCauchyKernel, None, False),
     "modgcauchy": (ModifiedGeneralCauchyKernel, None, False),
-    "gcauchy": (GeneralCauchyKernel, None, False),
     "poly2": (
         lambda ard_num_dims=None, **kwargs: PolynomialKernel(power=2),
         None,
@@ -271,15 +270,15 @@ KERNEL_DEFAULTS = {
         ),
         None,
         True
-    ),
-    "mat52+const": (
-        lambda ard_num_dims, **kwargs: gpytorch.kernels.AdditiveKernel(
-            MaternKernel(nu=2.5, ard_num_dims=ard_num_dims),
-            ConstantKernel()
-        ),
-        None,
-        True
     )
+    # "mat52+const": (
+    #     lambda ard_num_dims, **kwargs: gpytorch.kernels.AdditiveKernel(
+    #         MaternKernel(nu=2.5, ard_num_dims=ard_num_dims),
+    #         ConstantKernel()
+    #     ),
+    #     None,
+    #     True
+    # )
 }
 
 def inv_sigmoid(x):
