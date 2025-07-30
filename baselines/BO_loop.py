@@ -14,6 +14,10 @@ def _extract_hyperparams(model) -> Dict[str, float]:
     """Extracts hyperparameters from a trained GP model"""
     params = {}
     
+    #Mean
+    if hasattr(model.gp_model.mean_module, 'constant'):
+        params['mean_constant'] = float(model.gp_model.mean_module.constant.item())
+
     # Get kernel parameters
     if hasattr(model.gp_model.covar_module, 'base_kernel'):
         kernel = model.gp_model.covar_module.base_kernel
@@ -141,8 +145,8 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
 
         #save hyperparam history
         df_hyperparams = pd.DataFrame(hyperparam_history)
-        output_path = output_dir / f"hyperparams_{func_name}_{kernel_type}_seed{seed}.pkl"
-        df_hyperparams.to_pickle(output_path)
+        output_path = output_dir / f"hyperparams_{func_name}_{kernel_type}_seed{seed}.csv"
+        df_hyperparams.to_csv(output_path, index=False)
         print(f"Saved hyperparameters to {output_path}")
 
     return best_y, time_list
