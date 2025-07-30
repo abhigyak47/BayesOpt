@@ -48,6 +48,7 @@ def _extract_hyperparams(model) -> Dict[str, float]:
 
 
 def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, if_softplus=True, acqf_type="UCB", set_ls=False,
+               full_kernel_name=None,
                kernel_type="mat52",
                device="cpu"):
     #initial storing
@@ -59,7 +60,7 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
 
     #create output dir structure
     base_dir = Path(__file__).parent.parent  # Goes up from baselines/ to project root
-    output_dir = base_dir / "hyperparams" / func_name / kernel_type
+    output_dir = base_dir / "hyperparams" / func_name / full_kernel_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
 

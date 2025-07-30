@@ -237,7 +237,6 @@ KERNEL_DEFAULTS = {
     # Format: KernelType: (constructor, default_nu, supports_ard)
     "mat12": (MaternKernel, 0.5, True),
     "mat32": (MaternKernel, 1.5, True),
-    "mat52_ard": (MaternKernel, 2.5, True),
     "mat52": (MaternKernel, 2.5, True),
     "rbf": (RBFKernel, None, True),
     "rq": (RQKernel, None, True),
@@ -255,7 +254,6 @@ KERNEL_DEFAULTS = {
     "wendland0": (WendlandKernel, 0, True),
     "wendland1": (WendlandKernel, 1, True),
     "wendland2": (WendlandKernel, 2, True),
-    "gcauchy_ard": (GeneralCauchyKernel, None, True),
     "gcauchy": (GeneralCauchyKernel, None, True),
     "modgcauchy": (ModifiedGeneralCauchyKernel, None, True),
     "poly2": (
