@@ -251,13 +251,13 @@ KERNEL_DEFAULTS = {
         True   # 
     ),
 
-    "wendland": (WendlandKernel, 0, False),     # left for legacy purposes
-    "wendland0": (WendlandKernel, 0, False),
-    "wendland1": (WendlandKernel, 1, False),
-    "wendland2": (WendlandKernel, 2, False),
+    "wendland": (WendlandKernel, 0, True),     # left for legacy purposes
+    "wendland0": (WendlandKernel, 0, True),
+    "wendland1": (WendlandKernel, 1, True),
+    "wendland2": (WendlandKernel, 2, True),
     "gcauchy_ard": (GeneralCauchyKernel, None, True),
-    "gcauchy": (GeneralCauchyKernel, None, False),
-    "modgcauchy": (ModifiedGeneralCauchyKernel, None, False),
+    "gcauchy": (GeneralCauchyKernel, None, True),
+    "modgcauchy": (ModifiedGeneralCauchyKernel, None, True),
     "poly2": (
         lambda ard_num_dims=None, **kwargs: PolynomialKernel(power=2),
         None,
@@ -335,8 +335,10 @@ class ExactGPModel(gpytorch.models.ExactGP, GPyTorchModel):
                 gpytorch.kernels.MaternKernel(ard_num_dims=train_x.shape[1], lengthscale_constraint=self.ls_constraint),
             )
             if set_ls:
-                ls = torch.ones_like(self.covar_module.base_kernel.lengthscale) * math.sqrt(self.D)
-                self.covar_module.base_kernel._set_lengthscale(ls)
+                print(f"set_ls handled outside of ExactGPModel now; see surrounding code")
+            # if set_ls:
+            #     ls = torch.ones_like(self.covar_module.base_kernel.lengthscale) * math.sqrt(self.D)
+            #     self.covar_module.base_kernel._set_lengthscale(ls)
         else:
             self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel(lengthscale_constraint=self.ls_constraint))
 
@@ -422,7 +424,7 @@ class GP_Wrapper:
             self.X, self.y, self.likelihood,
             if_ard=if_ard,
             if_softplus=if_softplus,
-            set_ls=set_ls
+            set_ls=set_ls  # set_ls is irrelevant
         ).to(device)
         self.gp_model.covar_module = ScaleKernel(base_kernel).to(device)
 
