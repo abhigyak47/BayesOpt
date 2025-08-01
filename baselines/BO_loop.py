@@ -8,48 +8,70 @@ import pickle
 from typing import Dict, List
 import pandas as pd
 from pathlib import Path
+import numpy as np
 
 
 def _extract_hyperparams(model) -> Dict[str, float]:
-    """Extracts hyperparameters from a trained GP model"""
-    params = {}
-    
-    #Mean
-    if hasattr(model.gp_model.mean_module, 'constant'):
-        params['mean_constant'] = float(model.gp_model.mean_module.constant.item())
+    """Extract hyperparameters from a trained GP model. Handles ARD safely."""
+    def _record(name: str, x, out: Dict[str, float]):
+        # Accept python numbers, torch tensors, numpy arrays
+        if isinstance(x, (int, float)):
+            out[name] = float(x)
+            return
+        if torch.is_tensor(x):
+            t = x.detach().cpu()
+            if t.numel() == 1:
+                out[name] = float(t.item())
+            else:
+                flat = t.reshape(-1)
+                for i, v in enumerate(flat):
+                    out[f"{name}_dim_{i}"] = float(v.item())
+            return
+        if hasattr(x, "shape"):  # numpy
 
-    # Get kernel parameters
-    if hasattr(model.gp_model.covar_module, 'base_kernel'):
-        kernel = model.gp_model.covar_module.base_kernel
-    else:
-        kernel = model.gp_model.covar_module
-        
-    # Lengthscales (ARD or single)
-    if hasattr(kernel, 'lengthscale'):
-        ls = kernel.lengthscale.detach().cpu().numpy()
-        if ls.shape[1] > 1:  # ARD case
-            for i in range(ls.shape[1]):
-                params[f'lengthscale_dim_{i}'] = float(ls[0, i])
-        else:
-            params['lengthscale'] = float(ls[0, 0])
-    
-    # Output scale
-    if hasattr(model.gp_model.covar_module, 'outputscale'):
-        params['outputscale'] = float(model.gp_model.covar_module.outputscale.detach().cpu().numpy())
-    
+            a = np.asarray(x)
+            if a.size == 1:
+                out[name] = float(a.reshape(()))
+            else:
+                flat = a.reshape(-1)
+                for i, v in enumerate(flat):
+                    out[f"{name}_dim_{i}"] = float(v)
+            return
+        # Fallback
+        out[name] = float(x)
+
+    params: Dict[str, float] = {}
+
+    # Mean
+    if hasattr(model.gp_model.mean_module, "constant"):
+        _record("mean_constant", model.gp_model.mean_module.constant, params)
+
+    # Kernel
+    kernel = (model.gp_model.covar_module.base_kernel
+              if hasattr(model.gp_model.covar_module, "base_kernel")
+              else model.gp_model.covar_module)
+
+    # Lengthscale (ARD or scalar)
+    if hasattr(kernel, "lengthscale"):
+        _record("lengthscale", kernel.lengthscale, params)
+
+    # Outputscale
+    if hasattr(model.gp_model.covar_module, "outputscale"):
+        _record("outputscale", model.gp_model.covar_module.outputscale, params)
+
     # Noise variance
-    if hasattr(model.gp_model.likelihood, 'noise'):
-        params['noise'] = float(model.gp_model.likelihood.noise.detach().cpu().numpy())
-    
-    # Kernel-specific parameters
-    if hasattr(kernel, 'nu'):  # Matern nu
-        params['nu'] = float(kernel.nu)
-    elif hasattr(kernel, 'alpha'):  # GeneralCauchy alpha
-        params['alpha'] = float(kernel.alpha)
-        params['beta'] = float(kernel.beta)
-    
-    return params
+    if hasattr(model.gp_model.likelihood, "noise"):
+        _record("noise", model.gp_model.likelihood.noise, params)
 
+    # Kernel-specific
+    if hasattr(kernel, "nu"):  # Matern
+        _record("nu", getattr(kernel, "nu"), params)
+    if hasattr(kernel, "alpha"):  # General/Modified Cauchy (handles ARD)
+        _record("alpha", getattr(kernel, "alpha"), params)
+    if hasattr(kernel, "beta"):
+        _record("beta", getattr(kernel, "beta"), params)
+
+    return params
 
 def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, if_softplus=True, acqf_type="UCB", set_ls=False,
                full_kernel_name=None,

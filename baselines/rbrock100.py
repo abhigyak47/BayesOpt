@@ -9,25 +9,47 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import torch
 torch.set_default_dtype(torch.float64)
+import gpytorch
 import numpy as np
 
-from data import FuncRosenbrock_V1, BayesOptDataset
+from data import BayesOptDataset, FuncRosenbrock_V1
 from .BO_loop import BO_loop_GP
 
 # ----- globals you likely want to tweak -----
-DIM        = 100
-NUM_INIT   = 20
-NUM_ITER   = 3
-BETA       = 1.5
-SEEDS      = list(range(1, 11))
-#KERNELS = ["rbf", "mat12", "mat52", "lin*mat52", "gcauchy", "poly2", "poly2*mat52", "mat52+const","rq"]
-KERNELS = ["poly2","poly2*mat52"]
+DIM         = 100
+NUM_INIT    = 20
+NUM_ITER    = 400
+BETA        = 1.5
+SEEDS       = list(range(1, 10))
+DEVICE      = torch.device("cpu")
 
-DEVICE = torch.device("cpu")
+# ----- per‐kernel flag & base‐kernel settings -----
+KERNEL_FLAGS = {
+    "gcauchy":        {"kernel": "gcauchy", "set_ls": False, "if_ard": False},
+    # "gcauchy_ard":    {"kernel": "gcauchy", "set_ls": False, "if_ard": True},
+    # "gcauchy_ard_ri": {"kernel": "gcauchy", "set_ls": True,  "if_ard": True},
+    # "gcauchy_ri":     {"kernel": "gcauchy", "set_ls": True,  "if_ard": False},
+    "mat52":          {"kernel": "mat52",   "set_ls": False,  "if_ard": False},
+    # "mat52_ard":      {"kernel": "mat52",   "set_ls": False,  "if_ard": True},
+    # "mat52_ard_ri":   {"kernel": "mat52",   "set_ls": True,  "if_ard": True},
+    # "mat52_ri":       {"kernel": "mat52",   "set_ls": True,  "if_ard": False},
+    # "rbf":          {"kernel": "rbf",   "set_ls": False,  "if_ard": False},
+    # "rbf_ard":      {"kernel": "rbf",   "set_ls": False,  "if_ard": True},
+    # "rbf_ard_ri":   {"kernel": "rbf",   "set_ls": True,  "if_ard": True},
+    # "rbf_ri":       {"kernel": "rbf",   "set_ls": True,  "if_ard": False},
+    "mat12":          {"kernel": "mat12",   "set_ls": False,  "if_ard": False},
+    # "mat12_ard":      {"kernel": "mat12",   "set_ls": False,  "if_ard": True},
+    # "mat12_ard_ri":   {"kernel": "mat12",   "set_ls": True,  "if_ard": True},
+    # "mat12_ri":       {"kernel": "mat12",   "set_ls": True,  "if_ard": False},      
+    "rq":          {"kernel": "rq",   "set_ls": False,  "if_ard": False},
+    # "rq_ard":      {"kernel": "rq",   "set_ls": False,  "if_ard": True},
+    # "rq_ard_ri":   {"kernel": "rq",   "set_ls": True,  "if_ard": True},
+    # "rq_ri":       {"kernel": "rq",   "set_ls": True,  "if_ard": False},
+}
+KERNELS = list(KERNEL_FLAGS)
 
-def run_one(kernel: str, seed: int, num_iter: int, beta: float, root_dir: str, func_name="rosenbrock100"):
-
-    # keep each worker single-threaded to avoid oversubscription
+def run_one(kernel: str, seed: int, num_iter: int, beta: float,
+            root_dir: str, func_name: str = "Rosenbrock100"):
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
     torch.set_num_threads(1)
@@ -36,66 +58,69 @@ def run_one(kernel: str, seed: int, num_iter: int, beta: float, root_dir: str, f
     np.random.seed(seed)
     random.seed(seed)
 
-    func = FuncRosenbrock_V1(DIM, maximize=True)
+    func    = FuncRosenbrock_V1(DIM, maximize=True)
     dataset = BayesOptDataset(func, NUM_INIT, 'lhs', seed)
 
-    best_vals, _ = BO_loop_GP(
-        func_name="Rosenbrock",
-        dataset=dataset,
-        seed=seed,
-        num_step=num_iter,
-        beta=beta,
-        if_ard=True,
-        if_softplus=True,
-        acqf_type="UCB",
-        set_ls=False,
-        kernel_type=kernel,
-        device=DEVICE
-    )
+    flags      = KERNEL_FLAGS[kernel]
+    base_kern  = flags["kernel"]
+    set_ls     = flags["set_ls"]
+    if_ard     = flags["if_ard"]
 
-    # File path: results/{function}/{kernel}/{function}_{kernel}_seed{seed}.csv
+    with gpytorch.settings.cholesky_max_tries(100):
+        best_vals, _ = BO_loop_GP(
+            func_name=func_name,
+            dataset=dataset,
+            seed=seed,
+            num_step=num_iter,
+            beta=beta,
+            if_ard=if_ard,
+            if_softplus=True,
+            acqf_type="UCB",
+            set_ls=set_ls,
+            kernel_type=base_kern,
+            full_kernel_name=kernel,
+            device=DEVICE
+        )
+
     subdir = os.path.join(root_dir, func_name, kernel)
     os.makedirs(subdir, exist_ok=True)
-    filename = f"{func_name}_{kernel}_seed{seed}.csv"
-    filepath = os.path.join(subdir, filename)
+    fn     = f"{func_name}_{kernel}_seed{seed}.csv"
+    path   = os.path.join(subdir, fn)
 
-    with open(filepath, "w", newline="") as f:
+    with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=["iteration", "best_obj_val"])
         writer.writeheader()
-        for itr, val in enumerate(best_vals, 1):
-            writer.writerow({
-                "iteration": itr,
-                "best_obj_val": float(val),
-            })
-    
+        for i, v in enumerate(best_vals, 1):
+            writer.writerow({"iteration": i, "best_obj_val": float(v)})
+
     return len(best_vals)
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--n-workers", type=int, default=os.cpu_count()-1 or 1,
-                   help="max parallel processes (default: os.cpu_count()-1)")
-    p.add_argument("--results-dir", type=str, default="results",
-               help="root output directory (default: results/)")
-    p.add_argument("--num-iter", type=int, default=NUM_ITER,
+    p.add_argument("--n-workers",   type=int,
+                   default=os.cpu_count()-1 or 1,
+                   help="max parallel processes")
+    p.add_argument("--results-dir", type=str,
+                   default="results",
+                   help="root output directory")
+    p.add_argument("--num-iter",    type=int,
+                   default=NUM_ITER,
                    help="BO iterations per (kernel, seed)")
     return p.parse_args()
 
-
 def main():
     args = parse_args()
-
     os.makedirs(args.results_dir, exist_ok=True)
 
     tasks = list(product(KERNELS, SEEDS))
-    max_workers = min(args.n_workers, len(tasks))
-    print(f"Using {max_workers} workers for {len(tasks)} jobs")
+    max_w = min(args.n_workers, len(tasks))
+    print(f"Using {max_w} workers for {len(tasks)} jobs")
 
-    start = time.time()
-
-    # safer with torch
     torch.multiprocessing.set_start_method("spawn", force=True)
-    total_rows = 0
-    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+    start = time.time()
+    total = 0
+
+    with ProcessPoolExecutor(max_workers=max_w) as ex:
         futures = {
             ex.submit(run_one, k, s, args.num_iter, BETA, args.results_dir): (k, s)
             for k, s in tasks
@@ -103,14 +128,14 @@ def main():
         for fut in as_completed(futures):
             k, s = futures[fut]
             try:
-                rows_written = fut.result()
-                total_rows += rows_written
-                print(f"Completed kernel={k} seed={s} ({rows_written} rows)")
+                n = fut.result()
+                total += n
+                print(f"Done {k}, seed={s}: wrote {n} rows")
             except Exception as e:
                 print(f"[ERROR] kernel={k} seed={s}: {e}")
 
-    elapsed = time.time() - start
-    print(f"Done in {elapsed/60:.2f} min. Wrote {total_rows} rows to {args.results_dir}")
+    elapsed = (time.time() - start)/60
+    print(f"All finished in {elapsed:.2f} min. Wrote ~{total} rows to {args.results_dir}")
 
 if __name__ == "__main__":
     main()

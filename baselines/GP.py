@@ -222,6 +222,78 @@ class GeneralCauchyKernel(Kernel):
         r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
         return (1 + r.pow(self.alpha)).pow(-self.beta / self.alpha)
 
+class FullyARDGeneralCauchyKernel(Kernel):
+    has_lengthscale, is_stationary = True, True
+    def __init__(self, ard_num_dims: int, alpha_constraint=None, beta_constraint=None, **kwargs):
+        kwargs.pop("nu", None); kwargs.pop("k", None)
+        ard_num_dims = int(ard_num_dims)
+        super().__init__(ard_num_dims=ard_num_dims, **kwargs)
+
+        D = int(self.lengthscale.size(-1))
+        if alpha_constraint is None: alpha_constraint = Interval(1e-3, 2.0)
+        if beta_constraint  is None: beta_constraint  = Positive()
+
+        # match lengthscale shape: (1, D)
+        self.register_parameter("raw_alpha", torch.nn.Parameter(torch.ones(1, D)))
+        self.register_constraint("raw_alpha", alpha_constraint)
+        self.register_parameter("raw_beta",  torch.nn.Parameter(torch.ones(1, D)))
+        self.register_constraint("raw_beta",  beta_constraint)
+
+    @property
+    def alpha(self): return self.raw_alpha_constraint.transform(self.raw_alpha)
+    @alpha.setter
+    def alpha(self, v):
+        D = self.raw_alpha.shape[-1]
+        v = torch.as_tensor(v, dtype=self.raw_alpha.dtype, device=self.raw_alpha.device)
+        if v.numel() == 1:
+            v = v.expand_as(self.raw_alpha)
+        elif v.shape[-1] == D:
+            v = v.view(1, D)
+        self.initialize(raw_alpha=self.raw_alpha_constraint.inverse_transform(v))
+
+    @property
+    def beta(self): return self.raw_beta_constraint.transform(self.raw_beta)
+    @beta.setter
+    def beta(self, v):
+        D = self.raw_beta.shape[-1]
+        v = torch.as_tensor(v, dtype=self.raw_beta.dtype, device=self.raw_beta.device)
+        if v.numel() == 1:
+            v = v.expand_as(self.raw_beta)
+        elif v.shape[-1] == D:
+            v = v.view(1, D)
+        self.initialize(raw_beta=self.raw_beta_constraint.inverse_transform(v))
+
+    def forward(self, x1, x2, diag: bool = False, **params):
+        # active dims + ARD scaling
+        x1 = x1[..., self.active_dims] if getattr(self, "active_dims", None) is not None else x1
+        x2 = x2[..., self.active_dims] if getattr(self, "active_dims", None) is not None else x2
+        x1s = x1 / self.lengthscale
+        x2s = x2 / self.lengthscale
+
+        if diag:
+            r = (x1s - x2s).abs()                   # (N, D)
+        else:
+            r = (x1s.unsqueeze(1) - x2s.unsqueeze(0)).abs()  # (N, M, D)
+
+        # --- stable per-dim term in log-space ---
+        # Avoid log(0): compute r^α as exp(α * log r) only where r>0.
+        eps = 1e-12
+        r_pos = r > 0
+        log_r = torch.zeros_like(r)
+        log_r[r_pos] = torch.log(r[r_pos].clamp_min(eps))
+
+        r_alpha = torch.zeros_like(r)
+        r_alpha[r_pos] = torch.exp(self.alpha * log_r)[r_pos]          # 0 when r==0 (no grad through log 0)
+
+        log1p_ralpha = torch.log1p(r_alpha)                             # stable near 0
+        exponent = -self.beta / self.alpha                              # (1,1,D)
+        log_k_per_dim = exponent * log1p_ralpha                         # (..., D)
+
+        # At r==0, contribution is exactly 0; we already have r_alpha=0 ⇒ log1p(0)=0 ⇒ fine.
+        # Sum over dimensions (product in log-space), then exp back
+        log_k = log_k_per_dim.sum(dim=-1)                               # (...,)
+        return torch.exp(log_k)
+
 
 class ProductKernel(gpytorch.kernels.Kernel):
     def __init__(self, kernel1, kernel2, **kwargs):
@@ -255,7 +327,7 @@ KERNEL_DEFAULTS = {
     "wendland1": (WendlandKernel, 1, True),
     "wendland2": (WendlandKernel, 2, True),
     "gcauchy": (GeneralCauchyKernel, None, True),
-    "modgcauchy": (ModifiedGeneralCauchyKernel, None, True),
+    "fullyardgcauchy": (FullyARDGeneralCauchyKernel, None, True),
     "poly2": (
         lambda ard_num_dims=None, **kwargs: PolynomialKernel(power=2),
         None,
