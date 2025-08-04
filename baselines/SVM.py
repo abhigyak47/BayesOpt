@@ -22,7 +22,7 @@ DIM         = 200
 NUM_INIT    = 20
 NUM_ITER    = 300
 BETA        = 1.5
-SEEDS       = list(range(1, 10))
+SEEDS       = list(range(0, 1))
 DEVICE      = torch.device("cpu")
 
 # ----- per‐kernel flag & base‐kernel settings -----
