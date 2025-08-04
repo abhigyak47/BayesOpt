@@ -2,3 +2,4 @@ mujoco210-linux-x86_64.tar.gz
 mujoco210-linux-x86_64.tar.gz.1
 mujoco210-linux-x86_64.tar.gz.2
 NASLib
+*.pyc
