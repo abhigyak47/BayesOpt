@@ -22,16 +22,16 @@ DIM         = 200
 NUM_INIT    = 20
 NUM_ITER    = 300
 BETA        = 1.5
-SEEDS       = list(range(1, 11))
+SEEDS       = list(range(0, 1))
 DEVICE      = torch.device("cpu")
 
 # ----- per‐kernel flag & base‐kernel settings -----
 KERNEL_FLAGS = {
-    #"gcauchy":        {"kernel": "gcauchy", "set_ls": False, "if_ard": False},
+    "gcauchy":        {"kernel": "gcauchy", "set_ls": False, "if_ard": False},
     # "gcauchy_ard":    {"kernel": "gcauchy", "set_ls": False, "if_ard": True},
     # "gcauchy_ard_ri": {"kernel": "gcauchy", "set_ls": True,  "if_ard": True},
     "gcauchy_ri":     {"kernel": "gcauchy", "set_ls": True,  "if_ard": False},
-    #"mat52":          {"kernel": "mat52",   "set_ls": False,  "if_ard": False},
+    "mat52":          {"kernel": "mat52",   "set_ls": False,  "if_ard": False},
     # "mat52_ard":      {"kernel": "mat52",   "set_ls": False,  "if_ard": True},
     # "mat52_ard_ri":   {"kernel": "mat52",   "set_ls": True,  "if_ard": True},
     "mat52_ri":       {"kernel": "mat52",   "set_ls": True,  "if_ard": False},
@@ -39,11 +39,11 @@ KERNEL_FLAGS = {
     # "rbf_ard":      {"kernel": "rbf",   "set_ls": False,  "if_ard": True},
     # "rbf_ard_ri":   {"kernel": "rbf",   "set_ls": True,  "if_ard": True},
     # "rbf_ri":       {"kernel": "rbf",   "set_ls": True,  "if_ard": False},
-    #"mat12":          {"kernel": "mat12",   "set_ls": False,  "if_ard": False},
+    "mat12":          {"kernel": "mat12",   "set_ls": False,  "if_ard": False},
     # "mat12_ard":      {"kernel": "mat12",   "set_ls": False,  "if_ard": True},
     # "mat12_ard_ri":   {"kernel": "mat12",   "set_ls": True,  "if_ard": True},
     "mat12_ri":       {"kernel": "mat12",   "set_ls": True,  "if_ard": False},      
-    # "rq":          {"kernel": "rq",   "set_ls": False,  "if_ard": False},
+     "rq":          {"kernel": "rq",   "set_ls": False,  "if_ard": False},
     # "rq_ard":      {"kernel": "rq",   "set_ls": False,  "if_ard": True},
     # "rq_ard_ri":   {"kernel": "rq",   "set_ls": True,  "if_ard": True},
     "rq_ri":       {"kernel": "rq",   "set_ls": True,  "if_ard": False},

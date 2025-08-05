@@ -4,7 +4,7 @@ from infras.randutils import *
 from benchmark.rover_function import Rover
 from benchmark.mopta8 import MoptaSoftConstraints
 from benchmark.real_dataset import RealDataset
-from BO_loop import BO_loop_GP,  BO_loop_GP_MAP, Vanilla_BO_loop
+from baselines.BO_loop import BO_loop_GP,  BO_loop_GP_MAP, Vanilla_BO_loop
 import click
 from joblib import Parallel, delayed
 import pandas as pd
