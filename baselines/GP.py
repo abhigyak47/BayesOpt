@@ -222,6 +222,152 @@ class GeneralCauchyKernel(Kernel):
         r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
         return (1 + r.pow(self.alpha)).pow(-self.beta / self.alpha)
 
+
+
+import torch
+from typing import Optional
+from gpytorch.kernels.kernel import Kernel
+from gpytorch.constraints import Interval, Positive
+
+class GeneralCauchyKernelAltParameterization(Kernel):
+    r"""
+    Alternate parameterization of the Generalized Cauchy kernel (stationary):
+
+    .. math::
+        k(r) = \bigl(1 + \tfrac{r^\gamma}{2\,\alpha'}\bigr)^{-\alpha'},
+        \quad r = \|x - x'\| / \rho
+
+    Parameters:
+    - gamma ∈ (0, 2] (shape parameter)
+    - alpha_prime > 0 (decay parameter)
+    - lengthscale ρ can be scalar or vector (via `ard_num_dims`)
+
+    H = 1-gamma * alpha'/2 \in (1/2, 1) is Hurst parameter when $\alpha' \in (0, 1/\gamma)$.
+    """
+    has_lengthscale = True
+    is_stationary = True
+
+    def __init__(
+        self,
+        gamma_constraint=None,
+        alpha_prime_constraint=None,
+        ard_num_dims: Optional[int] = None,
+        **kwargs
+    ):
+        super().__init__(ard_num_dims=ard_num_dims, **kwargs)
+
+        # γ ∈ (0,2]
+        if gamma_constraint is None:
+            gamma_constraint = Interval(1e-5, 2.0)
+        self.register_parameter(
+            name="raw_gamma",
+            parameter=torch.nn.Parameter(torch.tensor(1.0))
+        )
+        self.register_constraint("raw_gamma", gamma_constraint)
+
+        # α' > 0
+        if alpha_prime_constraint is None:
+            alpha_prime_constraint = Positive()
+        self.register_parameter(
+            name="raw_alpha_prime",
+            parameter=torch.nn.Parameter(torch.tensor(0.5))
+        )
+        self.register_constraint("raw_alpha_prime", alpha_prime_constraint)  
+
+    @property
+    def gamma(self):
+        return self.raw_gamma_constraint.transform(self.raw_gamma)
+
+    @gamma.setter
+    def gamma(self, value):
+        value = torch.as_tensor(value).to(self.raw_gamma)
+        self.initialize(raw_gamma=self.raw_gamma_constraint.inverse_transform(value))
+
+    @property
+    def alpha_prime(self):
+        return self.raw_alpha_prime_constraint.transform(self.raw_alpha_prime)
+
+    @alpha_prime.setter
+    def alpha_prime(self, value):
+        value = torch.as_tensor(value).to(self.raw_alpha_prime)
+        self.initialize(raw_alpha_prime=self.raw_alpha_prime_constraint.inverse_transform(value))
+
+    def forward(self, x1, x2, diag=False, **params):
+        # r = ||x - x'|| / ρ
+        x1_ = x1 / self.lengthscale
+        x2_ = x2 / self.lengthscale
+        r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
+        # k(r) = (1 + r^γ / (2 α'))^{-α'}
+        return (1 + r.pow(self.gamma).div(2 * self.alpha_prime)).pow(-self.alpha_prime)
+
+
+
+class GeneralCauchyKernelFractal(Kernel):
+    r"""
+    Generalized Cauchy kernel (stationary).
+
+    .. math::
+        k(r) = \left(1 + r^\alpha\right)^{-\beta/\alpha}, \quad r = \|x-x'\|/\ell
+
+    Parameters:
+    - alpha ∈ (0, 2] (controls shape)
+    - beta > 0 (controls decay)
+    - lengthscale ℓ can be scalar or vector (via `ard_num_dims`)
+    """
+    has_lengthscale = True
+    is_stationary = True
+
+    def __init__(
+        self,
+        alpha_constraint=None,
+        beta_constraint=None,
+        ard_num_dims: Optional[int] = None,
+        **kwargs
+    ):
+        super().__init__(ard_num_dims=ard_num_dims, **kwargs)
+
+        if alpha_constraint is None:
+            alpha_constraint = Interval(1e-5, 2.0)
+        self.register_parameter(
+            name="raw_alpha",
+            parameter=torch.nn.Parameter(torch.tensor(1.0))
+        )
+        self.register_constraint("raw_alpha", alpha_constraint)
+
+        if beta_constraint is None:
+            beta_constraint = Interval(1e-5, 1.0)
+        self.register_parameter(
+            name="raw_beta",
+            parameter=torch.nn.Parameter(torch.tensor(0.5))
+        )
+        self.register_constraint("raw_beta", beta_constraint)
+
+    @property
+    def alpha(self):
+        return self.raw_alpha_constraint.transform(self.raw_alpha)
+
+    @alpha.setter
+    def alpha(self, value):
+        value = torch.as_tensor(value).to(self.raw_alpha)
+        self.initialize(raw_alpha=self.raw_alpha_constraint.inverse_transform(value))
+
+    @property
+    def beta(self):
+        return self.raw_beta_constraint.transform(self.raw_beta)
+
+    @beta.setter
+    def beta(self, value):
+        value = torch.as_tensor(value).to(self.raw_beta)
+        self.initialize(raw_beta=self.raw_beta_constraint.inverse_transform(value))
+
+    def forward(self, x1, x2, diag=False, **params):
+        x1_ = x1 / self.lengthscale
+        x2_ = x2 / self.lengthscale
+        r = self.covar_dist(x1_, x2_, diag=diag, square_dist=False, **params)
+        return (1 + r.pow(self.alpha)).pow(-self.beta / self.alpha)
+
+
+
 class FullyARDGeneralCauchyKernel(Kernel):
     has_lengthscale, is_stationary = True, True
     def __init__(self, ard_num_dims: int, alpha_constraint=None, beta_constraint=None, **kwargs):
@@ -327,6 +473,8 @@ KERNEL_DEFAULTS = {
     "wendland1": (WendlandKernel, 1, True),
     "wendland2": (WendlandKernel, 2, True),
     "gcauchy": (GeneralCauchyKernel, None, True),
+    "gcauchyfractal": (GeneralCauchyKernelFractal, None, True),
+    "gcauchyaltparam": (GeneralCauchyKernelAltParameterization, None, True),
     "fullyardgcauchy": (FullyARDGeneralCauchyKernel, None, True),
     "poly2": (
         lambda ard_num_dims=None, **kwargs: PolynomialKernel(power=2),
