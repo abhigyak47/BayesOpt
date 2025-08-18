@@ -1,6 +1,6 @@
 import torch
 from sklearn.preprocessing import StandardScaler
-
+import copy
 from infras.randutils import *
 from data.synfuncs import *
 
@@ -77,3 +77,9 @@ class BayesOptDataset(object):
 
     def get_curr_max_unnormed(self):
         return np.max(self.y)
+    
+
+    def clone(self):
+        print("Cloning")
+        new_dataset = copy.deepcopy(self)
+        return new_dataset
