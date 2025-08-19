@@ -339,6 +339,64 @@ class FuncAckley150(object):
             return f.reshape([-1, 1])
 
 
+class FuncAckleyKRY150(object):
+    """
+    AckleyKRY150:
+      - Same domain/scaling as Ackley150, truncated to 150 latent dims.
+      - Replace exp(-0.2 * r) with Matérn-3/2 k(r) = (1 + a r) exp(-a r),
+        with lengthscale ell = 1/0.2 = 5 => a = sqrt(3)/ell.
+      - Global optimum at x=0 with f=0 (same as Ackley).
+    """
+    def __init__(self, dim, maximize=True):
+        self.dim = dim
+        self.dims = dim
+        self.latent_dim = 150
+        self.maximize = maximize
+
+        self.lb = -32.768 * np.ones(dim, dtype=np.float64)
+        self.ub =  32.768 * np.ones(dim, dtype=np.float64)
+
+        self.inputs_scaler = MinMaxScaler()
+        self.inputs_scaler.fit(np.vstack([self.lb, self.ub]))
+
+        self._opt_inputs = np.zeros(self.dim, dtype=np.float64)
+
+        # Preserve lengthscale implied by Ackley exp(-0.2 * r): ell = 1/0.2 = 5
+        self.lengthscale = 1.0 / 0.2  # = 5.0
+
+    def _scale_inputs(self, X):
+        if X.ndim == 1 and X.size == self.dim:
+            X = X.reshape(1, self.dim)
+        assert X.shape[1] == self.dim, f"Expected input with {self.dim} dims, got {X.shape[1]}"
+        Xr = self.inputs_scaler.inverse_transform(X)
+        # Use only first 150 latent dimensions (like Ackley150)
+        return Xr[:, :self.latent_dim].astype(np.float64, copy=False)
+
+    def get_opts(self):
+        if self._opt_inputs.ndim == 1:
+            self._opt_inputs = self._opt_inputs.reshape(1, -1)
+        Xopts = self.inputs_scaler.transform(self._opt_inputs)
+        yopts = self.query(Xopts)
+        return Xopts, yopts
+
+    def query(self, X):
+        X = self._scale_inputs(X)
+
+        # r uses the same definition as in Ackley/AckleyKRY
+        r = np.sqrt(np.mean(X ** 2, axis=1))
+
+        # Matérn-3/2 with a = sqrt(3)/ell; ell chosen to match original radial decay scale
+        a = np.sqrt(3.0) / self.lengthscale  # ≈ 0.3464101615
+        k_m32 = (1.0 + a * r) * np.exp(-a * r)
+
+        part1 = -20.0 * k_m32
+        part2 = -np.exp(np.mean(np.cos(2.0 * np.pi * X), axis=1))
+        f = part1 + part2 + 20.0 + np.exp(1.0)
+
+        return (-f).reshape(-1, 1) if self.maximize else f.reshape(-1, 1)
+
+
+
 class FuncHartmann6(object):
     def __init__(
             self,
