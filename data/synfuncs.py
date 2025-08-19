@@ -145,6 +145,100 @@ class FuncAckley(object):
             return f.reshape([-1, 1])
 
 
+
+class FuncAckleyKRY(object):
+    def __init__(
+            self,
+            dim,
+            maximize=True,
+    ):
+        self.dim = dim
+        self.dims = dim
+        self.maximize = maximize
+
+        self.lb = -32.768 * np.ones(dim)
+        self.ub = 32.768 * np.ones(dim)
+
+        self.inputs_scaler = MinMaxScaler()
+        self.inputs_scaler.fit(np.vstack([self.lb, self.ub]))
+
+        self._opt_inputs = np.zeros(self.dim)
+
+        # Preserve original lengthscale implied by exp(-0.2 * r): ell = 1 / 0.2 = 5
+        self.lengthscale = 1.0 / 0.2
+
+    def _scale_inputs(self, X):
+        if X.ndim == 1 and X.size == self.dim:
+            X = X.reshape([1, self.dim])
+        assert X.shape[1] == self.dim
+        return self.inputs_scaler.inverse_transform(X)
+
+    def get_opts(self, ):
+        if self._opt_inputs.ndim == 1:
+            self._opt_inputs = self._opt_inputs.reshape([1, -1])
+        Xopts = self.inputs_scaler.transform(self._opt_inputs)
+        yopts = self.query(Xopts)
+        return Xopts, yopts
+
+    def query(self, X):
+        X = self._scale_inputs(X)
+        r = np.sqrt(np.mean(X ** 2, axis=1))  # same r as original
+        a = np.sqrt(3.0) / self.lengthscale   # = sqrt(3)/5 ≈ 0.34641
+        k_m32 = (1.0 + a * r) * np.exp(-a * r)
+
+        part1 = -20.0 * k_m32
+        part2 = -np.exp(np.mean(np.cos(2.0 * np.pi * X), axis=1))
+        f = part1 + part2 + 20.0 + np.exp(1.0)
+        return (-f).reshape([-1, 1]) if self.maximize else f.reshape([-1, 1])
+
+class FuncGriewank:
+    """
+    Griewank function:
+        f(x) = 1 + (1/4000) * sum_{i=1}^d x_i^2 - prod_{i=1}^d cos(x_i / sqrt(i))
+
+    Literature: usually evaluated on [-600, 600]^d with global minimum at x=0 (f=0).
+    Here we restrict to [-80, 80]^d to avoid numerical issues; optimum unchanged.
+    """
+    def __init__(self, dim=1, maximize=False):
+        self.dim = dim
+        self.dims = dim  # compatibility
+        self.maximize = maximize
+
+        # Tighter bounds (subset of standard domain)
+        self.lb = np.full((dim,), -80.0, dtype=np.float64)
+        self.ub = np.full((dim,),  80.0, dtype=np.float64)
+
+        self.inputs_scaler = MinMaxScaler()
+        self.inputs_scaler.fit(np.vstack([self.lb, self.ub]))
+
+        # Global minimum at the origin
+        self._opt_inputs = np.zeros((1, dim), dtype=np.float64)
+
+        # Precompute sqrt(i) as float with 1-based indexing
+        self._sqrt_idx = np.sqrt(np.arange(1, dim + 1, dtype=np.float64))
+
+    def _scale_inputs(self, X):
+        X = np.atleast_2d(X)
+        assert X.shape[1] == self.dim, f"Expected input with {self.dim} dimensions, got {X.shape[1]}"
+        return self.inputs_scaler.inverse_transform(X)
+
+    def query(self, X):
+        # X arrives scaled in [0,1]^d; map back to physical domain
+        X = self._scale_inputs(X).astype(np.float64, copy=False)
+
+        term1 = np.sum(X**2, axis=1) / 4000.0
+        term2 = np.prod(np.cos(X / self._sqrt_idx), axis=1)
+        f = (term1 - term2 + 1.0).reshape(-1, 1)
+
+        return -f if self.maximize else f
+
+    def get_opts(self):
+        Xopts = self.inputs_scaler.transform(self._opt_inputs)
+        yopts = self.query(Xopts)
+        return Xopts, yopts
+
+
+
 class FuncRosenbrock100(object):
 
     def __init__(
