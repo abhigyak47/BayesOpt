@@ -48,14 +48,14 @@ KERNEL_FLAGS = {
     # "rq_ard":      {"kernel": "rq",   "set_ls": False,  "if_ard": True},
     # "rq_ard_ri":   {"kernel": "rq",   "set_ls": True,  "if_ard": True},
     #"rq_ri":       {"kernel": "rq",   "set_ls": True,  "if_ard": False},
-    "gcauchyfractal":       {"kernel": "gcauchyfractal",   "set_ls": False,  "if_ard": False},
-    "gcauchyfractal_ard":   {"kernel": "gcauchyfractal",   "set_ls": False,  "if_ard": True},
-    "gcauchyfractal_ard_ri": {"kernel": "gcauchyfractal",   "set_ls": True,  "if_ard": True},
-    "gcauchyfractal_ri":     {"kernel": "gcauchyfractal",   "set_ls": True,  "if_ard": False},
-    "gcauchyaltparam":       {"kernel": "gcauchyaltparam", "set_ls": False,  "if_ard": False},
-    "gcauchyaltparam_ard":   {"kernel": "gcauchyaltparam", "set_ls": False,  "if_ard": True},
-    "gcauchyaltparam_ard_ri": {"kernel": "gcauchyaltparam", "set_ls": True,  "if_ard": True},
-    "gcauchyaltparam_ri":     {"kernel": "gcauchyaltparam", "set_ls": True,  "if_ard": False},
+    "mat52": {
+        "kernel": "mat52",
+        "if_ard": False,
+        "set_ls": False,          # keep your boolean init flag
+        "ls": None,               # None | "lognormal" | "uniform" | "true"
+        "noise": None,            # None | "lognormal" | "gamma"
+        "outscale": None,         # None | "hvarfner"
+    },
 }
 KERNELS = list(KERNEL_FLAGS)
 
@@ -74,8 +74,10 @@ def run_one(kernel: str, seed: int, num_iter: int, beta: float,
 
     flags      = KERNEL_FLAGS[kernel]
     base_kern  = flags["kernel"]
-    set_ls     = flags["set_ls"]
-    if_ard     = flags["if_ard"]
+    set_ls  = flags.get("set_ls", False)
+    if_ard  = flags.get("if_ard", False)
+    noise   = flags.get("noise", None)       # str or None
+    outsc   = flags.get("outscale", None)    # str or None    
 
     with gpytorch.settings.cholesky_max_tries(100):
         best_vals, _ = BO_loop_GP(
@@ -90,7 +92,9 @@ def run_one(kernel: str, seed: int, num_iter: int, beta: float,
             set_ls=set_ls,
             kernel_type=base_kern,
             full_kernel_name=kernel,
-            device=DEVICE
+            device=DEVICE,
+            noise_var=noise,
+            outputscale=outsc,            
         )
 
     subdir = os.path.join(root_dir, func_name, kernel)

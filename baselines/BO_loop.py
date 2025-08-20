@@ -76,7 +76,8 @@ def _extract_hyperparams(model) -> Dict[str, float]:
 def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, if_softplus=True, acqf_type="UCB", set_ls=False,
                full_kernel_name=None,
                kernel_type="mat52",
-               device="cpu"):
+               device="cpu",
+               **wrapper_kwargs):
     #initial storing
     hyperparam_history = []
     best_y = []
@@ -109,6 +110,7 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
                 if_softplus=if_softplus,
                 set_ls=set_ls,
                 device=device,
+                **wrapper_kwargs
             )
             model.init_optimizer(lr=0.1, optim="ADAM")
             model.step(epochs=2000)  # long train once

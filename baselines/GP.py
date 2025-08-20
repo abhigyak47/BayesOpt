@@ -472,9 +472,9 @@ KERNEL_DEFAULTS = {
     "wendland0": (WendlandKernel, 0, True),
     "wendland1": (WendlandKernel, 1, True),
     "wendland2": (WendlandKernel, 2, True),
-    "gcauchy": (GeneralCauchyKernel, None, True),
+    "gcauchy": (GeneralCauchyKernelAltParameterization, None, True),
     "gcauchyfractal": (GeneralCauchyKernelFractal, None, True),
-    "gcauchyaltparam": (GeneralCauchyKernelAltParameterization, None, True),
+    #"gcauchyaltparam": (GeneralCauchyKernelAltParameterization, None, True),
     "fullyardgcauchy": (FullyARDGeneralCauchyKernel, None, True),
     "poly2": (
         lambda ard_num_dims=None, **kwargs: PolynomialKernel(power=2),
@@ -542,23 +542,21 @@ class Vanilla_GP_Wrapper:
 
 class ExactGPModel(gpytorch.models.ExactGP, GPyTorchModel):
     _num_outputs = 1
-    def __init__(self, train_x, train_y, likelihood, if_ard=True, if_softplus=True, set_ls=False):
+    def __init__(self, train_x, train_y, likelihood, if_ard=True):
         super(ExactGPModel, self).__init__(train_x, train_y, likelihood)
         self.mean_module = gpytorch.means.ConstantMean()
-        self.ls_constraint = None
+
         self.D = train_x.shape[1]
 
         if if_ard:
             self.covar_module = gpytorch.kernels.ScaleKernel(
-                gpytorch.kernels.MaternKernel(ard_num_dims=train_x.shape[1], lengthscale_constraint=self.ls_constraint),
+                gpytorch.kernels.MaternKernel(ard_num_dims=train_x.shape[1]),
             )
-            if set_ls:
-                print(f"set_ls handled outside of ExactGPModel now; see surrounding code")
             # if set_ls:
             #     ls = torch.ones_like(self.covar_module.base_kernel.lengthscale) * math.sqrt(self.D)
             #     self.covar_module.base_kernel._set_lengthscale(ls)
         else:
-            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel(lengthscale_constraint=self.ls_constraint))
+            self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.MaternKernel())
 
     def forward(self, x):
         mean_x = self.mean_module(x)
@@ -607,13 +605,36 @@ class ExactGPModelRBF(gpytorch.models.ExactGP, GPyTorchModel):
         covar_x = self.covar_module(x)
         return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
 
+def _lower_or_none(x):
+    return x.lower() if isinstance(x, str) else None
+
 class GP_Wrapper:
     def __init__(self, train_x, train_y, kernel="mat52", if_ard=False, 
-                 if_softplus=True, set_ls=False, device="cpu", **kernel_args):
+                 if_softplus=True, set_ls=False, device="cpu", noise_var = None, outputscale = None, **kernel_args):
         self.device = device
         self.X = train_x.to(device)
         self.y = train_y.squeeze().to(device)
-        self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.Interval(1e-16, 1e-2, initial_value = 1e-7)).to(device)
+
+        ls_opt = _lower_or_none(set_ls)          # string mode: 'lognormal'/'uniform'/'true'
+        init_ls = bool(set_ls is True)           # boolean mode from your KERNEL_FLAGS
+
+        if noise_var is None:
+            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.Interval(1e-16, 1e-2, initial_value = 1e-7)).to(device)
+        elif noise_var.lower() == "lognormal":
+            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=LogNormalPrior(-4.0, 1.0)).to(device)
+        elif noise_var.lower() == "gamma":
+            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=GammaPrior(1.1, 0.05)).to(device)
+
+        dim = train_x.shape[1]
+
+        if ls_opt == "lognormal":
+            ls_prior = LogNormalPrior(math.sqrt(2) + math.log(dim)/2, math.sqrt(3))
+            ls_constraint = None
+        elif ls_opt == "uniform":
+            ls_prior = UniformPrior(0.0, 30.0)
+            ls_constraint = gpytorch.constraints.Interval(1e-10, 30.0)
+        else:
+            ls_prior, ls_constraint = None, None     
 
         # Handle kernel construction
         if isinstance(kernel, str):
@@ -623,6 +644,8 @@ class GP_Wrapper:
                     nu=default_nu if kernel_class == MaternKernel else None,
                     k=default_nu if kernel_class == WendlandKernel else None,
                     ard_num_dims=train_x.shape[1] if (if_ard and supports_ard) else None,
+                    lengthscale_prior=ls_prior if ls_opt in ["lognormal", "uniform"] else None,
+                    lengthscale_constraint=ls_constraint,
                     **kernel_args
                 )
             except KeyError:
@@ -630,62 +653,65 @@ class GP_Wrapper:
         else:
             base_kernel = kernel  # Direct kernel injection
 
-        # Handle constraints/priors
-        if not if_softplus:
-            base_kernel.lengthscale_constraint = Positive(transform=torch.exp, inv_transform=torch.log)
-        
-        if set_ls:
+        if ls_opt == "true" or ls_opt == "uniform":
             base_kernel.lengthscale = torch.ones_like(base_kernel.lengthscale) * math.sqrt(train_x.shape[1])
+
+
 
         # Finalize
         self.gp_model = ExactGPModel(
             self.X, self.y, self.likelihood,
-            if_ard=if_ard,
-            if_softplus=if_softplus,
-            set_ls=set_ls  # set_ls is irrelevant
+            if_ard=if_ard
         ).to(device)
-        self.gp_model.covar_module = ScaleKernel(base_kernel).to(device)
+
+        if outputscale is None:
+            self.gp_model.covar_module = ScaleKernel(base_kernel).to(device)
+        elif outputscale.lower() == "hvarfner":
+            full_kernel = ScaleKernel(base_kernel).to(device)
+            full_kernel.outputscale = 1
+            full_kernel.raw_outputscale.requires_grad = False
+            self.gp_model.covar_module = full_kernel
+        elif outputscale.lower() == "gamma":
+            full_kernel = ScaleKernel(
+                base_kernel,
+                outputscale_prior=GammaPrior(2.0, 2.0),
+            ).to(device)
+        else:
+            # raise error
+            raise ValueError(f"Unknown outputscale '{outputscale}'. Valid: [None, 'hvarfner', 'gamma']")
 
         # warm-restart state
         self.mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model).to(device)
         self.optimizer = None  # created on first call to init_optimizer
-
-# class GP_Wrapper:
-#     def __init__(self, train_x, train_y, if_ard=False, if_softplus=True, if_matern=True, set_ls=False, device="cpu"):
-#         self.device = device
-#         self.X = train_x
-#         self.y = train_y.squeeze()
-
-#         self.likelihood = gpytorch.likelihoods.GaussianLikelihood().to(self.device)
-#         if if_matern:
-#             self.gp_model = ExactGPModel(self.X, self.y, self.likelihood, if_ard, if_softplus, set_ls=set_ls).to(self.device)
-#         else:
-#             self.gp_model = ExactGPModelRBF(self.X, self.y, self.likelihood, if_ard, if_softplus, set_ls=set_ls).to(self.device)
-
+            
     def train_model(self, epochs=500, lr=0.1, optim="ADAM"):
         self.gp_model.train()
         self.likelihood.train()
 
         mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model).to(self.device)
-        if optim == "ADAM":
-            optimizer = torch.optim.Adam(self.gp_model.parameters(), lr=lr)
-        elif optim == "RMSPROP":
-            optimizer = torch.optim.RMSprop(self.gp_model.parameters(), lr=lr)
-        elif optim == "botorch":
-            stop_c = ExpMAStoppingCriterion(
-                maxiter=10000,
-                minimize=True,
-                n_window=10,
-                eta=1.0,
-                rel_tol=1e-6,
-            )
 
+        optu = optim.upper()
+        if optu == "ADAM":
+            optimizer = torch.optim.Adam(self.gp_model.parameters(), lr=lr)
+        elif optu == "RMSPROP":
+            optimizer = torch.optim.RMSprop(self.gp_model.parameters(), lr=lr)
+        elif optu in {"LBFGSB", "LBFGS-B", "SCIPY"}:
+            # True L-BFGS-B via SciPy; honors gpytorch constraints as bounds
+            try:
+                from botorch.optim.fit import fit_gpytorch_mll_scipy
+            except ImportError:
+                from botorch.fit import fit_gpytorch_mll_scipy  # older BoTorch
+            fit_gpytorch_mll_scipy(mll, options={"maxiter": int(epochs), "disp": False})
+            return
+        elif optu == "BOTORCH":
+            stop_c = ExpMAStoppingCriterion(maxiter=10000, minimize=True, n_window=10, eta=1.0, rel_tol=1e-6)
             optimizer = torch.optim.RMSprop(self.gp_model.parameters(), lr=0.05)
             botorch.fit.fit_gpytorch_mll_torch(mll, optimizer=optimizer, step_limit=1500, stopping_criterion=stop_c)
             return
         else:
-            raise NotImplementedError
+            raise NotImplementedError(f"Unknown optim: {optim}")
 
+        # standard PyTorch loop
         for epoch in range(epochs):
             optimizer.zero_grad()
             output = self.gp_model(self.X)
@@ -694,19 +720,23 @@ class GP_Wrapper:
             optimizer.step()
 
     
-    # ---- NEW ----
     def init_optimizer(self, lr=0.1, optim="ADAM"):
-        if optim == "ADAM":
+        optu = optim.upper()
+        self._optim_name = optu
+        if optu == "ADAM":
             self.optimizer = torch.optim.Adam(self.gp_model.parameters(), lr=lr)
-        elif optim == "RMSPROP":
+        elif optu == "RMSPROP":
             self.optimizer = torch.optim.RMSprop(self.gp_model.parameters(), lr=lr)
+        elif optu in {"LBFGSB", "LBFGS-B", "SCIPY"}:
+            self.optimizer = None  # SciPy path uses a separate fitter
         else:
-            raise NotImplementedError(f"Only ADAM/RMSPROP supported here, got {optim}.")
+            raise NotImplementedError(f"Only ADAM/RMSPROP/LBFGSB supported here, got {optim}.")
         return self.optimizer
 
-    def _loss_value(self) -> float:
+
+    def _loss_value(self) -> float: 
         self.gp_model.train()
-        with torch.no_grad():
+        with torch.no_grad(): 
             out = self.gp_model(self.X)
             loss = -self.mll(out, self.y)
         return loss.item()
@@ -714,38 +744,42 @@ class GP_Wrapper:
     @torch.enable_grad()
     def step(self, epochs: int, log_every: int = 0, verbose: bool = True,
             return_history: bool = False):
-        self.gp_model.train()
-        self.likelihood.train()
-    
+        self.gp_model.train(); self.likelihood.train()
+
+        if getattr(self, "_optim_name", None) in {"LBFGSB", "LBFGS-B", "SCIPY"}:
+            mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model).to(self.device)
+            try:
+                from botorch.optim.fit import fit_gpytorch_mll_scipy
+            except ImportError:
+                from botorch.fit import fit_gpytorch_mll_scipy
+            init_loss = self._loss_value()
+            fit_gpytorch_mll_scipy(mll, options={"maxiter": int(epochs), "disp": False})
+            end_loss = self._loss_value()
+            if verbose:
+                print(f"[GP_Wrapper.step][LBFGSB] {epochs} iters: {init_loss:.6f} → {end_loss:.6f} "
+                    f"(Δ={init_loss - end_loss:.6f}, rel={(init_loss - end_loss)/abs(init_loss):.2%})")
+            return (end_loss, []) if return_history else end_loss
+
+        # fallback: PyTorch loop for ADAM/RMSPROP (unchanged)
         init_loss = 1e10
         losses = []
-
         for t in range(epochs):
-
             self.optimizer.zero_grad()
-            output = self.gp_model(self.X)
-            loss = -self.mll(output, self.y)
+            out = self.gp_model(self.X)
+            loss = -self.mll(out, self.y)
             loss.backward()
             self.optimizer.step()
-
             cur = loss.item()
-
-            if t == 0:
-                init_loss = cur            
-            if return_history:
-                losses.append(cur)
+            if t == 0: init_loss = cur
+            if return_history: losses.append(cur)
             if log_every and (t + 1) % log_every == 0 and t > 0:
-                print(f"[epoch {t+1:4d}] loss={cur:.6f} "
-                    f"(Δ={init_loss - cur:.6f}, rel={(init_loss - cur)/abs(init_loss):.2%})")
-
+                print(f"[epoch {t+1:4d}] loss={cur:.6f} (Δ={init_loss - cur:.6f}, rel={(init_loss - cur)/abs(init_loss):.2%})")
         end_loss = self._loss_value()
         if verbose:
-            print(f"[GP_Wrapper.step] {epochs} epochs: "
-                f"{init_loss:.6f} → {end_loss:.6f} "
-                f"(Δ={init_loss - end_loss:.6f}, "
-                f"rel={(init_loss - end_loss)/abs(init_loss):.2%})")
-
+            print(f"[GP_Wrapper.step] {epochs} epochs: {init_loss:.6f} → {end_loss:.6f} "
+                f"(Δ={init_loss - end_loss:.6f}, rel={(init_loss - end_loss)/abs(init_loss):.2%})")
         return (end_loss, losses) if return_history else end_loss
+
 
     # ---- NEW ----
     def update_train_data(self, train_x, train_y):
@@ -757,14 +791,15 @@ class GP_Wrapper:
 
     def pred(self, test_x, num_samples=8):
         self.gp_model.eval()
-        f_pred = self.gp_model(test_x)
-        means = f_pred.mean
-        vars = f_pred.variance
-        dist = torch.distributions.MultivariateNormal(
-            means.squeeze(),
-            torch.diag(vars.squeeze())
-        )
-        samples = dist.sample((num_samples,)).permute(1, 0)
+        with torch.no_grad():
+            f_pred = self.gp_model(test_x)
+            means = f_pred.mean
+            vars = f_pred.variance
+            dist = torch.distributions.MultivariateNormal(
+                means.squeeze(),
+                torch.diag(vars.squeeze())
+            )
+            samples = dist.sample((num_samples,)).permute(1, 0)
         return samples, means, vars
 
 
