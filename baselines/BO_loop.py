@@ -78,6 +78,7 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
                kernel_type="mat52",
                device="cpu",
                **wrapper_kwargs):
+    optim = wrapper_kwargs.pop("optim", "LBFGS-B")
     #initial storing
     hyperparam_history = []
     best_y = []
@@ -98,8 +99,6 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
 
         # full (normalized) dataset every iter
         X, Y = dataset.get_data(normalize=True)
-        X, Y = X.to(device), Y.to(device)
-
         best_y_before = dataset.get_curr_max_unnormed()
 
         if i == 1:
@@ -112,12 +111,18 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
                 device=device,
                 **wrapper_kwargs
             )
-            model.init_optimizer(lr=0.1, optim="ADAM")
-            model.step(epochs=2000)  # long train once
+            model.init_optimizer(lr=0.1, optim=optim)
+            if optim.upper() in {"LBFGSB", "LBFGS-B", "SCIPY"}:
+                model.step(epochs=15000)     # LBFGS-B: epochs == maxiter
+            else:
+                model.step(epochs=2000)    # SGD-style loop
         else:
             # warm restart: reuse params & optimizer states
             model.update_train_data(X, Y)
-            model.step(epochs=50)
+            if optim.upper() in {"LBFGSB", "LBFGS-B", "SCIPY"}:
+                model.step(epochs=15000)
+            else:
+                model.step(epochs=50)
 
         #store hyperparameters after training
         hyperparams = _extract_hyperparams(model)
@@ -129,11 +134,11 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
         model.likelihood.eval()
 
         if acqf_type == "UCB":
-            acqf = UpperConfidenceBound(model=model.gp_model, beta=beta, maximize=True).to(device)
+            acqf = UpperConfidenceBound(model=model.gp_model, beta=beta, maximize=True)
         elif acqf_type == "EI":
-            acqf = ExpectedImprovement(model=model.gp_model, best_f=Y.max()).to(device)
+            acqf = ExpectedImprovement(model=model.gp_model, best_f=Y.max())
         elif acqf_type == "LogEI":
-            acqf = LogExpectedImprovement(model=model.gp_model, best_f=Y.max()).to(device)
+            acqf = LogExpectedImprovement(model=model.gp_model, best_f=Y.max())
         else:
             raise NotImplementedError
 
@@ -225,17 +230,17 @@ def BO_loop_GP_MAP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=True
     for i in range(1, num_step + 1):
         start_time = time.time()
         X, Y = dataset.get_data(normalize=True)
-        X = X.to(device)
-        Y = Y.to(device)
+        X = X
+        Y = Y
         best_y_before = dataset.get_curr_max_unnormed()
         model = GP_MAP_Wrapper(X, Y, if_ard=if_ard, if_matern=if_matern, optim_type=optim_type,
                                ls_prior_type=ls_prior_type, device=device, set_ls=set_ls)
         model.train_model()
 
         if acqf_type == "UCB":
-            acqf = UpperConfidenceBound(model=model.gp_model, beta=beta, maximize=True).to(device)
+            acqf = UpperConfidenceBound(model=model.gp_model, beta=beta, maximize=True)
         elif acqf_type == "EI":
-            acqf = ExpectedImprovement(model=model.gp_model, best_f=Y.max()).to(device)
+            acqf = ExpectedImprovement(model=model.gp_model, best_f=Y.max())
         else:
             raise NotImplementedError
 

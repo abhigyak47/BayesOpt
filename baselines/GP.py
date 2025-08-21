@@ -523,7 +523,7 @@ class Vanilla_GP_Wrapper:
     def train_model(self):
         self.gp_model.train()
 
-        mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.gp_model.likelihood, self.gp_model)
+        mll = self.mll
         optimizer = torch.optim.RMSprop(mll.parameters(), lr=0.1)
         botorch.fit.fit_gpytorch_mll_torch(mll, optimizer=optimizer)
 
@@ -612,62 +612,81 @@ class GP_Wrapper:
     def __init__(self, train_x, train_y, kernel="mat52", if_ard=False, 
                  if_softplus=True, set_ls=False, device="cpu", noise_var = None, outputscale = None, **kernel_args):
         self.device = device
-        self.X = train_x.to(device)
-        self.y = train_y.squeeze().to(device)
+        self.X = train_x
+        self.y = train_y.squeeze()
 
         ls_opt = _lower_or_none(set_ls)          # string mode: 'lognormal'/'uniform'/'true'
         init_ls = bool(set_ls is True)           # boolean mode from your KERNEL_FLAGS
 
         if noise_var is None:
-            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.Interval(1e-16, 1e-2, initial_value = 1e-7)).to(device)
+            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.Interval(1e-16, 1e-2, initial_value = 1e-7))
         elif noise_var.lower() == "lognormal":
-            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=LogNormalPrior(-4.0, 1.0)).to(device)
+            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=LogNormalPrior(-4.0, 1.0))
         elif noise_var.lower() == "gamma":
-            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=GammaPrior(1.1, 0.05)).to(device)
+            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=GammaPrior(1.1, 0.05))
 
         dim = train_x.shape[1]
 
         if ls_opt == "lognormal":
             ls_prior = LogNormalPrior(math.sqrt(2) + math.log(dim)/2, math.sqrt(3))
-            ls_constraint = None
+            ls_constraint = gpytorch.constraints.Positive()
         elif ls_opt == "uniform":
             ls_prior = UniformPrior(0.0, 30.0)
             ls_constraint = gpytorch.constraints.Interval(1e-10, 30.0)
         else:
-            ls_prior, ls_constraint = None, None     
+            ls_prior, ls_constraint = None, gpytorch.constraints.Positive()     
 
         # Handle kernel construction
         if isinstance(kernel, str):
             try:
                 kernel_class, default_nu, supports_ard = KERNEL_DEFAULTS[kernel]
-                base_kernel = kernel_class(
-                    nu=default_nu if kernel_class == MaternKernel else None,
-                    k=default_nu if kernel_class == WendlandKernel else None,
-                    ard_num_dims=train_x.shape[1] if (if_ard and supports_ard) else None,
-                    lengthscale_prior=ls_prior if ls_opt in ["lognormal", "uniform"] else None,
-                    lengthscale_constraint=ls_constraint,
-                    **kernel_args
-                )
+                kw = {}
+                if kernel_class is MaternKernel and default_nu is not None:
+                    kw["nu"] = default_nu
+                if kernel_class is WendlandKernel and default_nu is not None:
+                    kw["k"] = default_nu
+                if (if_ard and supports_ard):
+                    kw["ard_num_dims"] = train_x.shape[1]
+                if ls_prior is not None:
+                    kw["lengthscale_prior"] = ls_prior
+                if ls_constraint is not None:
+                    kw["lengthscale_constraint"] = ls_constraint
+                kw.update(kernel_args)
+                base_kernel = kernel_class(**kw)
             except KeyError:
                 raise ValueError(f"Unknown kernel '{kernel}'. Valid: {list(KERNEL_DEFAULTS.keys())}")
         else:
-            base_kernel = kernel  # Direct kernel injection
+            base_kernel = kernel
 
-        if ls_opt == "true" or ls_opt == "uniform":
-            base_kernel.lengthscale = torch.ones_like(base_kernel.lengthscale) * math.sqrt(train_x.shape[1])
+        # after constructing base_kernel
+        s = set_ls.lower() if isinstance(set_ls, str) else None
+        d = train_x.shape[1]
+        init_val = None
 
+        if (set_ls is True) or (s in {"true", "uniform"}):
+            init_val = math.sqrt(d)
+        elif s == "lognormal":
+            # mode of LogNormal(mu, sigma) with mu=√2 + 0.5*log d, sigma=√3
+            init_val = math.exp(math.sqrt(2) + 0.5*math.log(d) - 3.0)
 
+        if init_val is not None:
+            if hasattr(base_kernel, "lengthscale"):
+                base_kernel.lengthscale = torch.ones_like(base_kernel.lengthscale) * init_val
+            elif isinstance(base_kernel, gpytorch.kernels.ProductKernel):
+                for k in base_kernel.kernels:
+                    if hasattr(k, "lengthscale"):
+                        k.lengthscale = torch.ones_like(k.lengthscale) * init_val
 
         # Finalize
         self.gp_model = ExactGPModel(
             self.X, self.y, self.likelihood,
             if_ard=if_ard
-        ).to(device)
+        )
 
         if outputscale is None:
-            self.gp_model.covar_module = ScaleKernel(base_kernel).to(device)
+            self.gp_model.covar_module = ScaleKernel(base_kernel)
         elif outputscale.lower() == "hvarfner":
-            full_kernel = ScaleKernel(base_kernel).to(device)
+            full_kernel = ScaleKernel(base_kernel)
             full_kernel.outputscale = 1
             full_kernel.raw_outputscale.requires_grad = False
             self.gp_model.covar_module = full_kernel
@@ -675,20 +694,22 @@ class GP_Wrapper:
             full_kernel = ScaleKernel(
                 base_kernel,
                 outputscale_prior=GammaPrior(2.0, 2.0),
-            ).to(device)
+            )
+            self.gp_model.covar_module = full_kernel   # ← missing line
+
         else:
             # raise error
             raise ValueError(f"Unknown outputscale '{outputscale}'. Valid: [None, 'hvarfner', 'gamma']")
 
         # warm-restart state
-        self.mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model).to(device)
+        self.mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model)
         self.optimizer = None  # created on first call to init_optimizer
             
     def train_model(self, epochs=500, lr=0.1, optim="ADAM"):
         self.gp_model.train()
         self.likelihood.train()
 
-        mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model).to(self.device)
+        mll = self.mll
 
         optu = optim.upper()
         if optu == "ADAM":
@@ -747,7 +768,7 @@ class GP_Wrapper:
         self.gp_model.train(); self.likelihood.train()
 
         if getattr(self, "_optim_name", None) in {"LBFGSB", "LBFGS-B", "SCIPY"}:
-            mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model).to(self.device)
+            mll = self.mll
             try:
                 from botorch.optim.fit import fit_gpytorch_mll_scipy
             except ImportError:
@@ -858,10 +879,10 @@ class GP_MAP_Wrapper:
     def train_model(self):
         self.gp_model.train()
         if self.optim_type == "LBFGS":
-            mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.gp_model.likelihood, self.gp_model).to(self.device)
+            mll = self.mll
             botorch.fit.fit_gpytorch_mll(mll)
         elif self.optim_type == "ADAM":
-            mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.gp_model.likelihood, self.gp_model).to(self.device)
+            mll = self.mll
             stop_c = ExpMAStoppingCriterion(
                 maxiter = 10000,
                 minimize = True,
