@@ -6,7 +6,9 @@
 # python -m baselines.rbrock300-100 --n-workers 20
 # python -m baselines.stybtang200 --n-workers 20
 
-python -m baselines.ackleyKRY150 --n-workers 20
+#python -m baselines.ackleyKRY150 --n-workers 20
 #python -m baselines.ackleyKRY300-150 --n-workers 20
 # python -m baselines.hartmann6 --n-workers 20
 # python -m baselines.SVM --n-workers 20
+
+python -m baselines.ackley150 --n-workers 20 --skip-existing False

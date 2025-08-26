@@ -621,9 +621,9 @@ class GP_Wrapper:
         if noise_var is None:
             self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_constraint=gpytorch.constraints.Interval(1e-16, 1e-2, initial_value = 1e-7))
         elif noise_var.lower() == "lognormal":
-            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=LogNormalPrior(-4.0, 1.0))
+            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=LogNormalPrior(-4.0, 1.0), noise_constraint = gpytorch.constraints.GreaterThan(1e-4))
         elif noise_var.lower() == "gamma":
-            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=GammaPrior(1.1, 0.05))
+            self.likelihood = gpytorch.likelihoods.GaussianLikelihood(noise_prior=GammaPrior(1.1, 0.05), noise_constraint = gpytorch.constraints.GreaterThan(1e-4))
 
         dim = train_x.shape[1]
 
@@ -693,9 +693,9 @@ class GP_Wrapper:
         elif outputscale.lower() == "gamma":
             full_kernel = ScaleKernel(
                 base_kernel,
-                outputscale_prior=GammaPrior(2.0, 2.0),
+                outputscale_prior=GammaPrior(2.0, 0.15),
             )
-            self.gp_model.covar_module = full_kernel   # ← missing line
+            self.gp_model.covar_module = full_kernel   
 
         else:
             # raise error
@@ -705,7 +705,7 @@ class GP_Wrapper:
         self.mll = gpytorch.mlls.ExactMarginalLogLikelihood(self.likelihood, self.gp_model)
         self.optimizer = None  # created on first call to init_optimizer
             
-    def train_model(self, epochs=500, lr=0.1, optim="ADAM"):
+    def train_model(self, epochs=500, lr=0.01, optim="ADAM"):
         self.gp_model.train()
         self.likelihood.train()
 
@@ -741,7 +741,7 @@ class GP_Wrapper:
             optimizer.step()
 
     
-    def init_optimizer(self, lr=0.1, optim="ADAM"):
+    def init_optimizer(self, lr=0.01, optim="ADAM"):
         optu = optim.upper()
         self._optim_name = optu
         if optu == "ADAM":

@@ -34,8 +34,8 @@ FUNC = FuncAckleyKRY
 
 # ----- per‐kernel flag & base‐kernel settings -----
 def make_kernel_flags():
-    #kernels    = ["mat12", "mat32", "mat52", "rq", "gcauchy"]
-    kernels    = ["gcauchy"]
+    kernels    = ["mat12", "mat32", "mat52", "rq", "gcauchy"]
+    #kernels    = ["gcauchy"]
     ls_options = [True, "uniform", "lognormal"]
     outscales  = ["hvarfner", "gamma"]
     noise      = "lognormal"

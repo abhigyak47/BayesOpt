@@ -112,6 +112,7 @@ def BO_loop_GP(func_name, dataset, seed, num_step=200, beta=1.5, if_ard=False, i
                 **wrapper_kwargs
             )
             model.init_optimizer(lr=0.1, optim=optim)
+
             if optim.upper() in {"LBFGSB", "LBFGS-B", "SCIPY"}:
                 model.step(epochs=15000)     # LBFGS-B: epochs == maxiter
             else:
